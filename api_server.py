@@ -1,6 +1,6 @@
 import uvicorn
 import iq_patch # Patch IQ Option API for multi-user support
-from fastapi import FastAPI, HTTPException, Body, Depends, Header, Request
+from fastapi import FastAPI, HTTPException, Body, Depends, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import threading
@@ -84,26 +84,31 @@ class SessionManager:
 session_manager = SessionManager()
 
 # --- Dependency ---
-async def get_current_bot(request: Request, authorization: str = Header(None)):
-    if not authorization:
-        print("Auth Error: Missing Header")
-        print(f"Headers Received: {request.headers}")
-        raise HTTPException(status_code=401, detail="Missing Authorization Header")
+async def get_current_bot(request: Request, authorization: str = Header(None), token_query: str = Query(None, alias="token")):
+    final_token = None
     
-    # Expect format "Bearer <token>"
-    try:
-        parts = authorization.split()
-        if len(parts) != 2 or parts[0].lower() != 'bearer':
-             print(f"Auth Error: Invalid Format '{authorization}'")
-             raise HTTPException(status_code=401, detail="Invalid Authorization Header Format")
-        token = parts[1]
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid Authorization Header Format")
+    # 1. Try Authorization Header
+    if authorization:
+        try:
+            parts = authorization.split()
+            if len(parts) == 2 and parts[0].lower() == 'bearer':
+                final_token = parts[1]
+        except ValueError:
+            pass
 
-    bot = session_manager.get_session(token)
+    # 2. Try Query Parameter (Fallback)
+    if not final_token and token_query:
+        final_token = token_query
+
+    if not final_token:
+        print("Auth Error: Missing Header and Query Param")
+        # print(f"Headers Received: {request.headers}")
+        raise HTTPException(status_code=401, detail="Missing Authorization Header or Token")
+
+    bot = session_manager.get_session(final_token)
     if not bot:
-        print(f"Auth Error: Session Not Found for token '{token}'")
-        print(f"Active Sessions: {list(session_manager.sessions.keys())}")
+        print(f"Auth Error: Session Not Found for token '{final_token}'")
+        # print(f"Active Sessions: {list(session_manager.sessions.keys())}")
         raise HTTPException(status_code=401, detail="Invalid or Expired Session")
     return bot
 
