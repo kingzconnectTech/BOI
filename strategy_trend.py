@@ -160,7 +160,12 @@ class TrendPullbackStrategy:
                                         'confidence': 85,
                                         'price': close,
                                         'pattern': "EMA 20 Pullback Rejection",
-                                        'mode': "UPTREND"
+                                        'mode': "UPTREND",
+                                        'indicators': {
+                                            'rsi': rsi,
+                                            'ema_diff': abs(ema_fast - ema_slow),
+                                            'candle_size': abs(close - open_p)
+                                        }
                                     }
 
         # --- PUT SETUP ---
@@ -199,7 +204,12 @@ class TrendPullbackStrategy:
                                         'confidence': 85,
                                         'price': close,
                                         'pattern': "EMA 20 Pullback Rejection",
-                                        'mode': "DOWNTREND"
+                                        'mode': "DOWNTREND",
+                                        'indicators': {
+                                            'rsi': rsi,
+                                            'ema_diff': abs(ema_fast - ema_slow),
+                                            'candle_size': abs(close - open_p)
+                                        }
                                     }
                                     
         return None
