@@ -56,7 +56,8 @@ with st.sidebar.expander("🔐 IQ Option Login (Optional)"):
     
     if st.button("Connect IQ Option"):
         if iq_email and iq_password:
-            success, msg = st.session_state.data_feed.connect_iq(iq_email, iq_password, account_type)
+            with st.spinner(f"Connecting to IQ Option ({account_type})..."):
+                success, msg = st.session_state.data_feed.connect_iq(iq_email, iq_password, account_type)
             if success:
                 st.success(msg)
             else:

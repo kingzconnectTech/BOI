@@ -1,6 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import time
+import os
 from datetime import datetime, timezone
 try:
     from iqoptionapi.stable_api import IQ_Option
@@ -14,15 +15,57 @@ class DataFeed:
         self.use_iq = False
         self.is_connected = False
 
+    def disconnect(self):
+        """
+        Disconnects from IQ Option and clears the session.
+        """
+        if self.iq_api:
+            try:
+                # Attempt to close the websocket connection
+                if hasattr(self.iq_api, 'api'):
+                    if hasattr(self.iq_api.api, 'logout'):
+                        self.iq_api.api.logout()
+                    if hasattr(self.iq_api.api, 'close'):
+                        self.iq_api.api.close()
+                elif hasattr(self.iq_api, 'close'):
+                    self.iq_api.close()
+            except Exception as e:
+                print(f"Error closing IQ connection: {e}")
+            
+            self.iq_api = None
+        
+        # Clean up session file if it exists
+        if os.path.exists("session.json"):
+            try:
+                os.remove("session.json")
+            except:
+                pass
+        
+        self.is_connected = False
+        self.use_iq = False
+        return True, "Disconnected"
+
     def connect_iq(self, email, password, account_type="PRACTICE"):
         """
         Connects to IQ Option API.
         account_type: "PRACTICE" or "REAL"
         """
+        # Ensure previous session is cleared
+        self.disconnect()
+
         if not IQ_Option:
             return False, "iqoptionapi library not installed."
         
         try:
+            print(f"Connecting with email: {email}")
+            
+            # Extra cleanup before new connection
+            if os.path.exists("session.json"):
+                try:
+                    os.remove("session.json")
+                except:
+                    pass
+            
             self.iq_api = IQ_Option(email, password)
             
             # Retry logic for connection
@@ -307,19 +350,19 @@ class DataFeed:
                 check, trade_id = self.iq_api.buy_digital_spot(iq_symbol, amount, action_lower, digital_duration)
                 
                 if check:
-                    return True, f"Digital Trade Executed! ID: {trade_id} (Duration: {digital_duration}m)"
+                    return True, {'id': trade_id, 'type': 'DIGITAL'}, f"Digital Trade Executed! ID: {trade_id} (Duration: {digital_duration}m)"
                 
                 # If failed, trade_id often contains the error message/reason
-                return False, f"Digital Failed: {trade_id}"
+                return False, None, f"Digital Failed: {trade_id}"
 
             # Helper for Binary Execution
             def try_binary():
                 # check if pair is open
                 check, trade_id = self.iq_api.buy(amount, iq_symbol, action_lower, duration)
                 if check:
-                    return True, f"Binary Trade Executed! ID: {trade_id}"
+                    return True, {'id': trade_id, 'type': 'BINARY'}, f"Binary Trade Executed! ID: {trade_id}"
                 
-                return False, f"Binary Failed: {trade_id}"
+                return False, None, f"Binary Failed: {trade_id}"
 
             # Execution Logic based on Mode
             if trade_mode == "DIGITAL":
@@ -329,22 +372,92 @@ class DataFeed:
                 return try_binary()
                 
             else: # AUTO (Try Binary -> Fallback Digital)
-                success, msg = try_binary()
+                success, details, msg = try_binary()
                 if success:
-                    return True, msg
+                    return True, details, msg
                 
                 # If Binary failed, try Digital
                 # Log that Binary failed
                 binary_msg = msg
                 
-                success, msg = try_digital()
+                success, details, msg = try_digital()
                 if success:
-                    return True, msg
+                    return True, details, msg
                 else:
-                    return False, f"Execution Failed. {binary_msg} | {msg}"
+                    return False, None, f"Execution Failed. {binary_msg} | {msg}"
 
         except Exception as e:
-            return False, f"Execution Error: {e}"
+            return False, None, f"Execution Error: {e}"
+
+    def check_trade_result(self, trade_id, trade_type):
+        """
+        Checks the result of a trade.
+        Returns: 'WIN', 'LOSS', 'TIE', or None (if pending/unknown)
+        """
+        if not self.use_iq or not self.is_connected:
+            return None
+            
+        try:
+            if trade_type == 'BINARY':
+                # Fetch recent binary options
+                # get_optioninfo returns a dict of recent trades
+                history = self.iq_api.get_optioninfo(20)
+                if history and isinstance(history, dict):
+                    # Keys are trade IDs (int or str)
+                    # We need to cast trade_id to int or str to match
+                    tid = int(trade_id)
+                    for k, v in history.items():
+                        if int(k) == tid:
+                            # Found the trade
+                            # v usually contains: 'win', 'amount', 'profit', etc.
+                            # 'win': 'win' / 'loose' / 'equal'?
+                            # Actually structure varies. 
+                            # Usually checking 'result': 'win'/'loose'
+                            # Or check profit.
+                            profit = v.get('profit_amount', 0) + v.get('win_amount', 0) 
+                            # If win_amount > 0 -> WIN
+                            # If win_amount == 0 -> LOSS (or TIE if returned stake)
+                            
+                            # Simpler check if 'win' key exists
+                            if 'win' in v:
+                                if v['win'] == 'win': return 'WIN'
+                                if v['win'] == 'loose': return 'LOSS'
+                                if v['win'] == 'equal': return 'TIE'
+                            
+                            # Fallback to profit
+                            # Note: On loss, profit is usually 0 or negative in some views, but here 'win_amount' is payout.
+                            if v.get('win_amount', 0) > 0:
+                                return 'WIN'
+                            return 'LOSS'
+                            
+            elif trade_type == 'DIGITAL':
+                # Digital check
+                # Try to get profit after sale (works for expired trades too in some versions)
+                try:
+                    profit = self.iq_api.get_digital_spot_profit_after_sale(trade_id)
+                    if profit is not None:
+                        if profit > 0: return 'WIN'
+                        if profit < 0: return 'LOSS'
+                        return 'TIE'
+                except:
+                    pass
+                
+                # Fallback: Check positions if available
+                try:
+                    # Some versions support this
+                    position = self.iq_api.get_digital_position(trade_id)
+                    if position and position.get('status') == 'closed':
+                        pnl = position.get('pnl', 0)
+                        if pnl > 0: return 'WIN'
+                        if pnl < 0: return 'LOSS'
+                        return 'TIE'
+                except:
+                    pass
+                
+        except Exception as e:
+            print(f"Check Trade Error: {e}")
+            
+        return None
 
     def get_resampled_data(self, df_1m, timeframe="5m"):
         """

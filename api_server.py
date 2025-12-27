@@ -9,6 +9,7 @@ from datetime import datetime
 import pandas as pd
 import json
 import yfinance as yf # For currency rates
+from exponent_server_sdk import PushClient, PushMessage
 
 # Import Bot Modules
 import config
@@ -43,6 +44,10 @@ class BotState:
         self.expiry_minutes = config.EXPIRY_MINUTES
         self.stop_loss = config.STOP_LOSS_LIMIT
         self.profit_goal = config.SESSION_PROFIT_GOAL
+        self.session_profit = 0.0
+        self.total_losses = 0
+        self.consecutive_losses = 0
+        self.loss_memory = [] # Stores conditions of losing trades
         self.logs = []
 
     def add_log(self, message):
@@ -53,6 +58,21 @@ class BotState:
             self.logs.pop(0)
 
 bot_state = BotState()
+
+# --- Push Notifications ---
+push_tokens = set()
+
+def send_push_notification(title, body):
+    # Run in thread to not block bot loop
+    def _send():
+        for token in list(push_tokens):
+            try:
+                PushClient().publish(
+                    PushMessage(to=token, title=title, body=body)
+                )
+            except Exception as e:
+                print(f"Push Error: {e}")
+    threading.Thread(target=_send).start()
 
 # --- Background Task ---
 def bot_loop():
@@ -78,10 +98,115 @@ def bot_loop():
                     # Update Outcomes for existing signals
                     bot_state.strategy.update_outcomes(df, bot_state.signals, current_asset=ticker)
                     
+                    # --- CLEANUP: Expire old PENDING signals ---
+                    # If a signal is PENDING for more than 5 minutes, mark EXPIRED
+                    now_ts = datetime.now()
+                    for s in bot_state.signals:
+                        if s['status'] == 'PENDING':
+                            # s['time'] is usually a pandas Timestamp or datetime
+                            try:
+                                # Convert s['time'] to datetime if needed, or compare timestamps
+                                sig_time = s['time']
+                                if isinstance(sig_time, pd.Timestamp):
+                                    sig_time = sig_time.to_pydatetime()
+                                
+                                # If signal is > 5 mins old
+                                if (now_ts - sig_time).total_seconds() > 300:
+                                    s['status'] = 'EXPIRED'
+                            except:
+                                pass # Ignore if time parsing fails
+
+                    # --- Process Completed Trades (Profit/Loss & ML) ---
+                    for sig in bot_state.signals:
+                        if sig.get('processed_outcome'): continue
+                        
+                        outcome = sig.get('outcome')
+                        
+                        # Verification for Real Trades
+                        if sig.get('status') == 'EXECUTED' and 'trade_id' in sig:
+                            # If outcome is set (by simulation) or not, we check API
+                            # Only process if API confirms
+                            real_outcome = bot_state.data_feed.check_trade_result(sig['trade_id'], sig.get('trade_type', 'BINARY'))
+                            
+                            if real_outcome in ['WIN', 'LOSS', 'TIE']:
+                                outcome = real_outcome
+                                sig['outcome'] = real_outcome
+                                # We trust this result
+                            else:
+                                # API check pending or failed.
+                                # Do NOT process yet. Wait for API.
+                                continue
+
+                        if outcome in ['WIN', 'LOSS']:
+                            # Mark as processed
+                            sig['processed_outcome'] = True
+                            
+                            # Calculate P/L
+                            profit = 0
+                            if outcome == 'WIN':
+                                profit = bot_state.trade_amount * 0.85 # Approx 85% payout
+                                bot_state.session_profit += profit
+                                bot_state.consecutive_losses = 0
+                                send_push_notification("Trade Won 💰", f"{ticker} Profit: +{profit:.2f}")
+                            elif outcome == 'LOSS':
+                                profit = -bot_state.trade_amount
+                                bot_state.session_profit += profit
+                                bot_state.consecutive_losses += 1
+                                bot_state.total_losses += 1
+                                send_push_notification("Trade Loss 🔻", f"{ticker} Loss: {profit:.2f}")
+                                
+                                # --- Machine Learning: Loss Analysis ---
+                                if 'indicators' in sig:
+                                    bot_state.loss_memory.append({
+                                        'indicators': sig['indicators'],
+                                        'type': sig['type'],
+                                        'time': sig['time_str']
+                                    })
+                                    bot_state.add_log(f"ML: Recorded loss pattern for {ticker}")
+                            
+                            bot_state.add_log(f"Trade Finished: {outcome} ({profit:+.2f}) | Session: {bot_state.session_profit:+.2f}")
+                            
+                            # --- Risk Management Checks ---
+                            # 1. Daily Profit Goal
+                            if bot_state.session_profit >= bot_state.profit_goal:
+                                bot_state.add_log(f"🎉 Profit Goal Reached ({bot_state.session_profit:.2f})! Stopping Bot.")
+                                bot_state.is_running = False
+                                disconnect_iq()
+                                break
+
+                            # 2. Max Loss Limit
+                            if bot_state.session_profit <= -bot_state.stop_loss:
+                                bot_state.add_log(f"🛑 Stop Loss Hit ({bot_state.session_profit:.2f})! Stopping Bot.")
+                                bot_state.is_running = False
+                                disconnect_iq()
+                                break
+                                
+                            # 3. ML Adaptation (2 Consecutive Losses)
+                            if bot_state.consecutive_losses >= 2:
+                                bot_state.add_log("⚠️ 2 Consecutive Losses! Analyzing patterns...")
+                                bot_state.add_log("ML: Adjusting strategy parameters temporarily.")
+                                # Simple Adaptation: Pause or Strict Mode could go here
+                                # For now, we rely on the check in analyze step
+
+                    if not bot_state.is_running: break
+
                     # Analyze Strategy
                     signal = bot_state.strategy.analyze_1m(df, symbol=ticker)
                     
                     if signal:
+                        # --- ML Guard: Check against recent loss patterns ---
+                        should_skip = False
+                        if bot_state.consecutive_losses >= 1: # Be cautious even after 1 loss if we have history
+                             for bad_trade in bot_state.loss_memory[-5:]: # Look at last 5 losses
+                                 # If same type (CALL/PUT) and very similar RSI (within 2 points)
+                                 if (signal['type'] == bad_trade['type'] and 
+                                     abs(signal['indicators']['rsi'] - bad_trade['indicators']['rsi']) < 2.0):
+                                     should_skip = True
+                                     bot_state.add_log(f"ML: Skipped signal - Similar to recent loss (RSI {signal['indicators']['rsi']:.1f})")
+                                     break
+                        
+                        if should_skip: continue
+
                         # Deduplicate signals
                         # Check if we already have this signal for this time
                         existing = [s for s in bot_state.signals if s['asset'] == ticker and s['time'] == signal['time']]
@@ -99,15 +224,32 @@ def bot_loop():
                             if bot_state.auto_trade_enabled:
                                 if not bot_state.data_feed.is_connected:
                                     bot_state.add_log(f"Skipped Auto-Trade {ticker}: Not Connected")
+                                    # Mark as SKIPPED so it doesn't stay PENDING forever
+                                    # We use index -1 because we just appended it
+                                    bot_state.signals[-1]['status'] = 'SKIPPED'
                                 else:
                                     bot_state.add_log(f"Executing Auto-Trade: {ticker} {signal['type']}")
-                                    success, msg = bot_state.data_feed.execute_trade(
-                                        symbol=ticker,
-                                        action=signal['type'],
-                                        amount=bot_state.trade_amount,
-                                        duration=bot_state.expiry_minutes,
-                                        trade_mode="AUTO"
-                                    )
+                                    
+                                    # Retry Logic for Execution (3 attempts)
+                                    max_retries = 3
+                                    success = False
+                                    details = None
+                                    msg = ""
+                                    
+                                    for attempt in range(max_retries):
+                                        success, details, msg = bot_state.data_feed.execute_trade(
+                                            symbol=ticker,
+                                            action=signal['type'],
+                                            amount=bot_state.trade_amount,
+                                            duration=bot_state.expiry_minutes,
+                                            trade_mode="AUTO"
+                                        )
+                                        
+                                        if success:
+                                            break
+                                        
+                                        bot_state.add_log(f"Execution Retry {attempt+1}/{max_retries} Failed: {msg}")
+                                        time.sleep(1) # Wait 1s before retry
                                     
                                     # Update Signal Status
                                     sig_idx = -1
@@ -115,8 +257,13 @@ def bot_loop():
                                         if success:
                                             bot_state.signals[sig_idx]['status'] = 'EXECUTED'
                                             bot_state.signals[sig_idx]['execution_msg'] = msg
+                                            if details:
+                                                bot_state.signals[sig_idx]['trade_id'] = details['id']
+                                                bot_state.signals[sig_idx]['trade_type'] = details['type']
+                                            bot_state.signals[sig_idx]['execution_time'] = datetime.now() # Track when executed
                                             bot_state.sound_queue.append("money")
                                             bot_state.add_log(f"Trade Success: {msg}")
+                                            send_push_notification("Trade Executed 🚀", f"{ticker} {msg}")
                                         else:
                                             bot_state.signals[sig_idx]['status'] = 'FAILED'
                                             bot_state.signals[sig_idx]['execution_msg'] = msg
@@ -149,6 +296,9 @@ class ConfigRequest(BaseModel):
     stop_loss: int = 2
     profit_goal: float = 5.0
     active_pairs: list = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC"]
+
+class PushToken(BaseModel):
+    token: str
 
 # --- Rate Caching ---
 rate_cache = {'USD': 1.0, 'NGN': 1650.0, 'EUR': 0.92, 'GBP': 0.77}
@@ -208,9 +358,7 @@ def connect_iq(req: ConnectRequest):
 
 @app.post("/disconnect")
 def disconnect_iq():
-    bot_state.data_feed.is_connected = False
-    bot_state.data_feed.use_iq = False
-    bot_state.data_feed.iq_api = None # Clear instance
+    bot_state.data_feed.disconnect()
     bot_state.add_log("Disconnected from IQ Option")
     return {"status": "disconnected"}
 
@@ -284,6 +432,12 @@ def update_config(req: ConfigRequest):
         bot_state.trade_amount = req.trade_amount # Fallback
         
     return {"status": "updated", "converted_amount": bot_state.trade_amount}
+
+@app.post("/register_push")
+def register_push(data: PushToken):
+    push_tokens.add(data.token)
+    print(f"Registered Push Token: {data.token}")
+    return {"status": "registered"}
 
 @app.get("/chart_data")
 def get_chart_data(symbol: str = "EURUSD-OTC"):
