@@ -86,12 +86,14 @@ session_manager = SessionManager()
 # --- Dependency ---
 async def get_current_bot(authorization: str = Header(None)):
     if not authorization:
+        print("Auth Error: Missing Header")
         raise HTTPException(status_code=401, detail="Missing Authorization Header")
     
     # Expect format "Bearer <token>"
     try:
         parts = authorization.split()
         if len(parts) != 2 or parts[0].lower() != 'bearer':
+             print(f"Auth Error: Invalid Format '{authorization}'")
              raise HTTPException(status_code=401, detail="Invalid Authorization Header Format")
         token = parts[1]
     except ValueError:
@@ -99,6 +101,8 @@ async def get_current_bot(authorization: str = Header(None)):
 
     bot = session_manager.get_session(token)
     if not bot:
+        print(f"Auth Error: Session Not Found for token '{token}'")
+        print(f"Active Sessions: {list(session_manager.sessions.keys())}")
         raise HTTPException(status_code=401, detail="Invalid or Expired Session")
     return bot
 

@@ -174,7 +174,9 @@ export default function App() {
 
   // Helper for authenticated requests
   const authFetch = async (endpoint: string, options: RequestInit = {}) => {
-      const token = await AsyncStorage.getItem('SESSION_TOKEN');
+      const token = sessionToken || await AsyncStorage.getItem('SESSION_TOKEN');
+      // console.log(`[AuthFetch] ${endpoint} Token: ${token ? token.substring(0,5)+'...' : 'None'}`);
+      
       const headers: any = {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -359,7 +361,9 @@ export default function App() {
     try {
       // Fetch Status (Protected)
       const statusRes = await authFetch('/status');
+      // console.log("Status Res:", statusRes.status);
       if (statusRes.status === 401) {
+          console.log("Got 401 - Logging out");
           // Token expired or invalid
           setConnected(false);
           setSessionToken(null);
