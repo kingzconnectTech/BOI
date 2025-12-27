@@ -175,7 +175,11 @@ export default function App() {
   // Helper for authenticated requests
   const authFetch = async (endpoint: string, options: RequestInit = {}) => {
       const token = sessionToken || await AsyncStorage.getItem('SESSION_TOKEN');
-      // console.log(`[AuthFetch] ${endpoint} Token: ${token ? token.substring(0,5)+'...' : 'None'}`);
+      console.log(`[AuthFetch] ${endpoint} Sending Headers:`, JSON.stringify({
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          ...options.headers,
+      }));
       
       const headers: any = {
           'Content-Type': 'application/json',

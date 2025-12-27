@@ -1,6 +1,6 @@
 import uvicorn
 import iq_patch # Patch IQ Option API for multi-user support
-from fastapi import FastAPI, HTTPException, Body, Depends, Header
+from fastapi import FastAPI, HTTPException, Body, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import threading
@@ -84,9 +84,10 @@ class SessionManager:
 session_manager = SessionManager()
 
 # --- Dependency ---
-async def get_current_bot(authorization: str = Header(None)):
+async def get_current_bot(request: Request, authorization: str = Header(None)):
     if not authorization:
         print("Auth Error: Missing Header")
+        print(f"Headers Received: {request.headers}")
         raise HTTPException(status_code=401, detail="Missing Authorization Header")
     
     # Expect format "Bearer <token>"
