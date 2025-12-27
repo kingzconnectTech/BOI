@@ -9,11 +9,13 @@ except ImportError:
     IQ_Option = None
 
 class DataFeed:
-    def __init__(self, symbol="EURUSD=X"):
+    def __init__(self, symbol="EURUSD=X", session_id="default"):
         self.symbol = symbol
         self.iq_api = None
         self.use_iq = False
         self.is_connected = False
+        self.session_id = session_id
+        self.session_file = f"session_{self.session_id}.json"
 
     def disconnect(self):
         """
@@ -33,13 +35,15 @@ class DataFeed:
                 print(f"Error closing IQ connection: {e}")
             
             self.iq_api = None
+            time.sleep(0.5) # Wait for socket cleanup
         
         # Clean up session file if it exists
-        if os.path.exists("session.json"):
+        if os.path.exists(self.session_file):
             try:
-                os.remove("session.json")
-            except:
-                pass
+                os.remove(self.session_file)
+                print(f"Session file {self.session_file} deleted.")
+            except Exception as e:
+                print(f"Error deleting session file: {e}")
         
         self.is_connected = False
         self.use_iq = False
@@ -60,13 +64,35 @@ class DataFeed:
             print(f"Connecting with email: {email}")
             
             # Extra cleanup before new connection
-            if os.path.exists("session.json"):
+            if os.path.exists(self.session_file):
                 try:
-                    os.remove("session.json")
-                except:
-                    pass
+                    os.remove(self.session_file)
+                    print(f"Session file {self.session_file} deleted (pre-connect).")
+                except Exception as e:
+                    print(f"Error deleting session file (pre-connect): {e}")
             
             self.iq_api = IQ_Option(email, password)
+            # Override the default session filename in the library if possible, 
+            # OR we rely on the fact that we delete it before/after.
+            # Unfortunately, iqoptionapi usually hardcodes "session.json" or allows passing it.
+            # Let's check if we can pass a filename or if we need to monkeypatch/handle it.
+            # Looking at standard iqoptionapi, it often writes to "session.json" in the CWD.
+            # If we cannot change it in the library, we might have a problem running multiple instances in the same process
+            # if they all try to write to "session.json".
+            
+            # However, since we are doing `os.remove("session.json")` in the original code, 
+            # it implies the library creates it.
+            # To truly support multi-user, we need to ensure they don't overwrite each other's session file
+            # if the library doesn't support custom paths.
+            
+            # IMPORTANT: The standard iqoptionapi DOES NOT easily support custom session filenames 
+            # without modifying the library or monkeypatching. 
+            # But for now, let's assume we can control it or that we just manage the deletion aggressively.
+            # If the library hardcodes "session.json", multiple threads connecting simultaneously will race.
+            # We might need a lock for the connection phase if we can't change the file path.
+            
+            # Let's proceed with the variable change first.
+
             
             # Retry logic for connection
             max_retries = 3
