@@ -502,7 +502,8 @@ def get_chart_data(symbol: str = "EURUSD-OTC", bot_state: BotState = Depends(get
         return data
     except Exception as e:
         print(f"Chart Data Error: {e}")
-        return {"error": str(e)}
+        # Return proper HTTP error so frontend knows data is missing
+        raise HTTPException(status_code=500, detail=f"Chart Data Error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)

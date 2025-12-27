@@ -397,26 +397,24 @@ export default function App() {
        // Fetch Chart Data (Protected)
        if (statusData.is_connected) {
           const chartRes = await authFetch(`/chart_data?symbol=${selectedChartPair}`);
-          const chartJson = await chartRes.json();
           
-          const rawData = Array.isArray(chartJson) ? chartJson : (chartJson.data || []);
-             
-          if (rawData.length > 0) {
-                const formattedData = rawData.map((item: any) => ({
-                   timestamp: item.timestamp,
-                   value: item.close,
-                   open: item.open,
-                   high: item.high,
-                   low: item.low,
-                   label: new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                }));
-                setChartData(formattedData);
-                setCurrentPrice(rawData[rawData.length - 1].close);
+          if (chartRes.ok) {
+              const chartJson = await chartRes.json();
+              const rawData = Array.isArray(chartJson) ? chartJson : (chartJson.data || []);
+                 
+              if (rawData.length > 0) {
+                    const formattedData = rawData.map((item: any) => ({
+                       timestamp: item.timestamp,
+                       value: item.close,
+                       open: item.open,
+                       high: item.high,
+                       low: item.low,
+                       label: new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                    }));
+                    setChartData(formattedData);
+                    setCurrentPrice(rawData[rawData.length - 1].close);
               }
-              
-              if (chartJson.error) {
-                  // Handle error
-              }
+          }
        }
 
     } catch (error) {
