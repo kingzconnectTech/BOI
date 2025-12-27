@@ -243,8 +243,9 @@ export default function App() {
       if (data.success) {
         // SAVE TOKEN
         if (data.token) {
-            await AsyncStorage.setItem('SESSION_TOKEN', data.token);
+            console.log("Saving Token:", data.token);
             setSessionToken(data.token);
+            await AsyncStorage.setItem('SESSION_TOKEN', data.token);
         }
         
         Alert.alert("Success", `Connected to ${accountType} Account!`);
@@ -447,7 +448,7 @@ export default function App() {
   }, [serverIp, selectedChartPair, showSettings, sessionToken]); // Restart poll if key deps change
 
   // --- Render ---
-  if (!connected && !sessionToken) {
+  if (!sessionToken) {
     // Show Login if not connected AND no token (or token check failed)
     return (
       <View style={styles.loginContainer}>
