@@ -11,8 +11,8 @@ import json
 import uuid
 import yfinance as yf # For currency rates
 from exponent_server_sdk import PushClient, PushMessage
-import sqlite3
-import hashlib
+import firebase_admin
+from firebase_admin import credentials, auth
 
 # Import Bot Modules
 import config
@@ -20,16 +20,17 @@ from data_feed import DataFeed
 from strategy_trend import TrendPullbackStrategy
 import indicators
 
-# --- DB Setup ---
-def init_db():
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password_hash TEXT)''')
-    conn.commit()
-    conn.close()
-
-init_db()
+# --- Firebase Setup ---
+# Check if serviceAccountKey.json exists
+import os
+if os.path.exists("serviceAccountKey.json"):
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin SDK Initialized")
+else:
+    print("WARNING: serviceAccountKey.json not found. Firebase Auth will fail.")
+    # Initialize with default creds if possible (unlikely for local dev without setup)
+    # firebase_admin.initialize_app()
 
 app = FastAPI(title="IQ Bot API", description="Backend for Mobile App")
 
@@ -76,18 +77,23 @@ class BotState:
 class SessionManager:
     def __init__(self):
         self.sessions = {} # token -> BotState
-        self.user_sessions = {} # username -> token
+        self.user_sessions = {} # uid -> token
 
-    def create_session(self, username):
+    def create_session(self, uid):
         # Invalidate existing session for this user if any
-        if username in self.user_sessions:
-            old_token = self.user_sessions[username]
+        if uid in self.user_sessions:
+            old_token = self.user_sessions[uid]
             self.remove_session(old_token)
 
+        # For Firebase, we can use the UID as the token OR create a new session token.
+        # To avoid confusion, let's keep generating a session token but map it to the UID.
+        # OR, simpler: Use the Firebase ID Token? No, it expires.
+        # Let's create a long-lived internal session token.
         token = str(uuid.uuid4())
-        # Use username as session_id to ensure unique file "session_<username>.json"
-        self.sessions[token] = BotState(session_id=username)
-        self.user_sessions[username] = token
+        
+        # Use UID as session_id for unique file "session_<uid>.json"
+        self.sessions[token] = BotState(session_id=uid)
+        self.user_sessions[uid] = token
         return token
 
     def get_session(self, token: str):
@@ -101,58 +107,33 @@ class SessionManager:
             except:
                 pass
             
-            # Remove from user_sessions map as well
-            # This is O(N) but N is small (active users). 
-            # Optimization: Store username in BotState or maintain reverse map.
-            # BotState has session_id which IS the username now.
-            username = self.sessions[token].session_id
-            if username in self.user_sessions:
-                del self.user_sessions[username]
+            uid = self.sessions[token].session_id
+            if uid in self.user_sessions:
+                del self.user_sessions[uid]
 
             del self.sessions[token]
 
 session_manager = SessionManager()
 
 # --- Auth Models ---
-class UserRegister(BaseModel):
-    username: str
-    password: str
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
+class FirebaseLogin(BaseModel):
+    id_token: str
 
 # --- Auth Endpoints ---
-@app.post("/auth/register")
-def register(user: UserRegister):
-    if len(user.password) < 4:
-         raise HTTPException(status_code=400, detail="Password too short")
-    
-    pwd_hash = hashlib.sha256(user.password.encode()).hexdigest()
+@app.post("/auth/verify")
+def verify_token(login: FirebaseLogin):
     try:
-        conn = sqlite3.connect('users.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (user.username, pwd_hash))
-        conn.commit()
-        conn.close()
-        return {"success": True, "message": "User registered successfully"}
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="Username already exists")
-
-@app.post("/auth/login")
-def login(user: UserLogin):
-    pwd_hash = hashlib.sha256(user.password.encode()).hexdigest()
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("SELECT id FROM users WHERE username=? AND password_hash=?", (user.username, pwd_hash))
-    row = c.fetchone()
-    conn.close()
-    
-    if row:
-        token = session_manager.create_session(user.username)
-        return {"success": True, "token": token, "username": user.username}
-    else:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        # Verify Firebase ID Token
+        decoded_token = auth.verify_id_token(login.id_token)
+        uid = decoded_token['uid']
+        
+        # Create Session for this UID
+        session_token = session_manager.create_session(uid)
+        
+        return {"success": True, "token": session_token, "uid": uid}
+    except Exception as e:
+        print(f"Firebase Auth Error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase Token")
 
 # --- Dependency ---
 async def get_current_bot(request: Request, authorization: str = Header(None), token_query: str = Query(None, alias="token")):
@@ -488,6 +469,7 @@ def get_status(bot_state: BotState = Depends(get_current_bot)):
         "is_connected": bot_state.data_feed.is_connected,
         "auto_trade": bot_state.auto_trade_enabled,
         "balance": balance,
+        "session_profit": bot_state.session_profit,
         "last_update": bot_state.last_update,
         "logs": bot_state.logs[-10:],
         "config": {
@@ -582,6 +564,29 @@ def get_chart_data(symbol: str = "EURUSD-OTC", bot_state: BotState = Depends(get
         print(f"Chart Data Error: {e}")
         # Return proper HTTP error so frontend knows data is missing
         raise HTTPException(status_code=500, detail=f"Chart Data Error: {str(e)}")
+
+class TradeRequest(BaseModel):
+    action: str
+    amount: float
+    asset: str
+    duration: int
+
+@app.post("/trade")
+def place_trade(req: TradeRequest, bot_state: BotState = Depends(get_current_bot)):
+    if not bot_state.data_feed.is_connected:
+        return {"success": False, "message": "Not Connected to IQ Option"}
+
+    success, details, msg = bot_state.data_feed.execute_trade(
+        symbol=req.asset,
+        action=req.action,
+        amount=req.amount,
+        duration=req.duration,
+        trade_mode="MANUAL"
+    )
+    
+    bot_state.add_log(f"Manual Trade: {req.action} {req.asset} -> {msg}")
+    
+    return {"success": success, "message": msg, "details": details}
 
 if __name__ == "__main__":
     uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)

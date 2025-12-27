@@ -12,3 +12,4 @@ fastapi
 uvicorn
 python-multipart
 exponent_server_sdk
+firebase-admin

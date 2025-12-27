@@ -12,6 +12,15 @@ import { ActivityIndicator, Alert, Dimensions, Modal, Platform, RefreshControl, 
 import { LineChart } from 'react-native-gifted-charts';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// --- Firebase ---
+import { initializeApp } from 'firebase/app';
+import { createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { firebaseConfig } from './firebaseConfig';
+
+// Initialize Firebase
+const fbApp = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+
 const BACKGROUND_FETCH_TASK = 'background-fetch-task';
 
 // Define the background task
@@ -137,6 +146,7 @@ export default function App() {
   const [autoTrade, setAutoTrade] = useState(false);
   const [tradeAmount, setTradeAmount] = useState('1.0');
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [manualTradeLoading, setManualTradeLoading] = useState(false);
   
   // Advanced Settings State
   const [expiry, setExpiry] = useState('2');
@@ -151,6 +161,7 @@ export default function App() {
   const [chartType, setChartType] = useState('AREA'); // 'LINE' or 'AREA'
   const [expoPushToken, setExpoPushToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   // --- Auth State ---
   const [authUsername, setAuthUsername] = useState('');
@@ -161,6 +172,7 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [signals, setSignals] = useState<any[]>([]);
   const [balance, setBalance] = useState(0);
+  const [sessionProfit, setSessionProfit] = useState(0.0);
   const [chartData, setChartData] = useState<any[]>([]);
   const [currentPrice, setCurrentPrice] = useState(0);
 
@@ -237,43 +249,51 @@ export default function App() {
   // --- API Functions ---
   const handleBotAuth = async () => {
     if (!authUsername || !authPassword) {
-        Alert.alert("Error", "Please enter username and password");
+        Alert.alert("Error", "Please enter email and password");
         return;
     }
 
     setIsConnecting(true);
-    const endpoint = isRegistering ? '/auth/register' : '/auth/login';
     try {
-        const response = await fetch(`${API_URL}${endpoint}`, {
+        let userCredential;
+        if (isRegistering) {
+            userCredential = await createUserWithEmailAndPassword(fbAuth, authUsername, authPassword);
+        } else {
+            userCredential = await signInWithEmailAndPassword(fbAuth, authUsername, authPassword);
+        }
+
+        const user = userCredential.user;
+        const idToken = await user.getIdToken();
+        
+        // Send Token to Backend to create Session
+        const response = await fetch(`${API_URL}/auth/verify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: authUsername, password: authPassword })
+            body: JSON.stringify({ id_token: idToken })
         });
-        const data = await response.json();
         
-        if (response.ok) {
-            if (isRegistering) {
-                Alert.alert("Success", "Account created! Please log in.");
-                setIsRegistering(false);
-            } else {
-                // Login Success
-                if (data.token) {
-                    console.log("Bot Login Token:", data.token);
-                    await AsyncStorage.setItem('SESSION_TOKEN', data.token);
-                    setSessionToken(data.token);
-                }
-            }
+        const data = await response.json();
+        if (data.success) {
+             if (data.token) {
+                 console.log("Bot Session Token:", data.token);
+                 await AsyncStorage.setItem('SESSION_TOKEN', data.token);
+                 setSessionToken(data.token);
+             }
         } else {
-            Alert.alert("Error", data.detail || "Authentication failed");
+             Alert.alert("Backend Error", data.detail || "Verification failed");
         }
-    } catch (e) {
-        Alert.alert("Error", "Network request failed");
+
+    } catch (e: any) {
+        Alert.alert("Auth Error", e.message);
     } finally {
         setIsConnecting(false);
     }
   };
 
   const logoutBot = async () => {
+      try {
+        await signOut(fbAuth);
+      } catch (e) {}
       await AsyncStorage.removeItem('SESSION_TOKEN');
       setSessionToken(null);
       setConnected(false);
@@ -352,6 +372,38 @@ export default function App() {
     }
   };
 
+  const placeManualTrade = async (action: 'CALL' | 'PUT') => {
+      if (!connected) {
+          Alert.alert("Error", "Not connected to IQ Option");
+          return;
+      }
+      
+      setManualTradeLoading(true);
+      try {
+          const response = await authFetch('/trade', {
+              method: 'POST',
+              body: JSON.stringify({
+                  asset: selectedChartPair,
+                  action: action,
+                  amount: parseFloat(tradeAmount),
+                  duration: parseInt(expiry)
+              })
+          });
+          
+          const data = await response.json();
+          if (data.success) {
+              Alert.alert("Trade Placed", `${action} ${selectedChartPair} - ${data.message}`);
+              fetchData(); // Refresh immediately
+          } else {
+              Alert.alert("Trade Failed", data.message || "Unknown error");
+          }
+      } catch (error) {
+          Alert.alert("Error", "Failed to place trade");
+      } finally {
+          setManualTradeLoading(false);
+      }
+  };
+
   const togglePair = (pair: string) => {
     let newPairs;
     if (activePairs.includes(pair)) {
@@ -425,6 +477,7 @@ export default function App() {
       setConnected(statusData.is_connected);
       setAutoTrade(statusData.auto_trade);
       setBalance(statusData.balance);
+      setSessionProfit(statusData.session_profit || 0.0);
       setLogs(statusData.logs.reverse()); // Newest first
       
       if (statusData.config) {
@@ -489,6 +542,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [serverIp, selectedChartPair, showSettings, sessionToken]); // Restart poll if key deps change
 
+  // Calculate Win Rate
+  const executedSignals = signals.filter(s => s.status === 'EXECUTED' || s.outcome === 'WIN' || s.outcome === 'LOSS');
+  const wins = executedSignals.filter(s => s.outcome === 'WIN').length;
+  const losses = executedSignals.filter(s => s.outcome === 'LOSS').length;
+  const winRate = executedSignals.length > 0 ? ((wins / (wins + losses)) * 100).toFixed(0) : 0;
+
   // --- Render ---
   if (!sessionToken) {
     // Show Bot Login/Register Form
@@ -503,7 +562,7 @@ export default function App() {
           
           <TextInput
             style={styles.input}
-            placeholder="Username"
+            placeholder="Email"
             placeholderTextColor="#94a3b8"
             value={authUsername}
             onChangeText={setAuthUsername}
@@ -600,21 +659,23 @@ export default function App() {
         {/* HEADER */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>BOI</Text>
-            <View style={styles.statusBadge}>
-              <View style={[styles.statusDot, { backgroundColor: '#00ff83' }]} />
-              <Text style={styles.statusText}>{accountType}</Text>
+            <Text style={styles.headerTitle}>Dashboard</Text>
+            <View style={[styles.statusBadge, { backgroundColor: connected ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)' }]}>
+              <View style={[styles.statusDot, { backgroundColor: connected ? '#22c55e' : '#ef4444' }]} />
+              <Text style={[styles.statusText, { color: connected ? '#22c55e' : '#ef4444' }]}>
+                  {connected ? `Connected (${accountType})` : 'Disconnected'}
+              </Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', gap: 10}}>
             <TouchableOpacity onPress={() => setShowAdvice(true)} style={styles.iconButton}>
-              <Ionicons name="information-circle-outline" size={24} color="#e2e8f0" />
+              <Ionicons name="bulb-outline" size={22} color="#94a3b8" />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowSettings(true)} style={styles.iconButton}>
-              <Ionicons name="settings-outline" size={24} color="#e2e8f0" />
+              <Ionicons name="options-outline" size={22} color="#94a3b8" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={disconnectFromIq} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={24} color="#ef4444" />
+            <TouchableOpacity onPress={disconnectFromIq} style={styles.iconButton}>
+              <Ionicons name="power-outline" size={22} color="#ef4444" />
             </TouchableOpacity>
           </View>
         </View>
@@ -703,27 +764,74 @@ export default function App() {
             </View>
         </Modal>
 
-        {/* --- Charts and Stats --- */}
+        {/* --- Stats Grid --- */}
+        <View style={styles.statsGrid}>
+          {/* Main Profit Card */}
+          <View style={[styles.statCard, {flex: 2}]}>
+             <View style={{flexDirection: 'row', justifyContent: 'space-between', width: '100%'}}>
+                 <View>
+                    <Text style={styles.statLabel}>Session Profit</Text>
+                    <Text style={[styles.statValue, {fontSize: 28, color: sessionProfit >= 0 ? '#22c55e' : '#ef4444'}]}>
+                        {CURRENCY_SYMBOLS[currency] || '$'}{Math.abs(sessionProfit).toFixed(2)}
+                    </Text>
+                 </View>
+                 <View style={[styles.iconContainer, {backgroundColor: sessionProfit >= 0 ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)'}]}>
+                    <Ionicons name={sessionProfit >= 0 ? "trending-up" : "trending-down"} size={24} color={sessionProfit >= 0 ? "#22c55e" : "#ef4444"} />
+                 </View>
+             </View>
+             {/* Progress Bar */}
+             <View style={{marginTop: 15, width: '100%'}}>
+                 <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+                    <Text style={{color: '#64748b', fontSize: 10}}>Goal: {CURRENCY_SYMBOLS[currency] || '$'}{profitGoal}</Text>
+                    <Text style={{color: '#64748b', fontSize: 10}}>{Math.min((Math.max(sessionProfit, 0) / parseFloat(profitGoal)) * 100, 100).toFixed(0)}%</Text>
+                 </View>
+                 <View style={{height: 6, backgroundColor: '#334155', borderRadius: 3, overflow: 'hidden'}}>
+                     <View style={{
+                         height: '100%', 
+                         width: `${Math.min((Math.max(sessionProfit, 0) / parseFloat(profitGoal)) * 100, 100)}%`, 
+                         backgroundColor: '#22c55e'
+                     }} />
+                 </View>
+             </View>
+          </View>
+
+          {/* Side Stats */}
+          <View style={{flex: 1, gap: 15}}>
+             <View style={styles.statCardSmall}>
+                 <Text style={styles.statLabel}>Win Rate</Text>
+                 <Text style={[styles.statValue, {fontSize: 18}]}>{winRate}%</Text>
+             </View>
+             <View style={styles.statCardSmall}>
+                 <Text style={styles.statLabel}>Balance</Text>
+                 <Text style={[styles.statValue, {fontSize: 16}]}>{CURRENCY_SYMBOLS[currency] || '$'}{balance.toFixed(0)}</Text>
+             </View>
+          </View>
+        </View>
+
+        {/* --- Charts --- */}
         <View style={styles.card}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15}}>
-              <Text style={styles.cardTitle}>Live Market</Text>
-              <View style={{flexDirection: 'row'}}>
+              <View>
+                  <Text style={styles.chartPairTitle}>{selectedChartPair.replace('-OTC', '')}</Text>
+                  <Text style={styles.chartPrice}>{currentPrice.toFixed(5)}</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{maxWidth: '60%'}}>
                   {AVAILABLE_PAIRS.map(pair => (
                       <TouchableOpacity 
                         key={pair} 
                         onPress={() => togglePair(pair)}
-                        style={[styles.pairBadge, activePairs.includes(pair) && styles.pairBadgeActive, {marginRight: 5}]}
+                        style={[styles.pairBadge, activePairs.includes(pair) && styles.pairBadgeActive, {marginRight: 8}]}
                       >
                           <Text style={[styles.pairText, activePairs.includes(pair) && styles.pairTextActive]}>
                               {pair.replace('-OTC', '')}
                           </Text>
                       </TouchableOpacity>
                   ))}
-              </View>
+              </ScrollView>
           </View>
 
           {/* Chart Component */}
-          <View style={{height: 250, backgroundColor: '#1e293b', borderRadius: 10, padding: 10, justifyContent: 'center'}}>
+          <View style={{height: 250, backgroundColor: '#0f172a', borderRadius: 12, padding: 5, justifyContent: 'center', overflow: 'hidden'}}>
              {chartData.length > 0 ? (
                  <LineChart
                     data={chartData}
@@ -732,51 +840,61 @@ export default function App() {
                     spacing={40}
                     initialSpacing={20}
                     color="#00ff83"
-                    thickness={2}
+                    thickness={3}
                     startFillColor="rgba(0, 255, 131, 0.3)"
                     endFillColor="rgba(0, 255, 131, 0.01)"
                     startOpacity={0.9}
-                    endOpacity={0.2}
+                    endOpacity={0.1}
                     areaChart={chartType === 'AREA'}
-                    yAxisColor="#334155"
-                    xAxisColor="#334155"
-                    yAxisTextStyle={{color: '#94a3b8', fontSize: 10}}
-                    xAxisLabelTextStyle={{color: '#94a3b8', fontSize: 10}}
+                    yAxisColor="transparent"
+                    xAxisColor="transparent"
+                    yAxisTextStyle={{color: '#64748b', fontSize: 10}}
+                    xAxisLabelTextStyle={{color: '#64748b', fontSize: 10}}
                     hideDataPoints
                     curved
                     isAnimated
+                    hideRules
                  />
              ) : (
                  <ActivityIndicator color="#00ff83" />
              )}
           </View>
-          <Text style={{color: '#94a3b8', textAlign: 'center', marginTop: 10}}>
-             {selectedChartPair} : {currentPrice}
-          </Text>
         </View>
 
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Profit</Text>
-            <Text style={[styles.statValue, {color: balance >= 0 ? '#00ff83' : '#ef4444'}]}>
-               {CURRENCY_SYMBOLS[currency] || '$'}{balance.toFixed(2)}
-            </Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Trades</Text>
-            <Text style={styles.statValue}>{signals.filter(s => s.status === 'EXECUTED').length}</Text>
-          </View>
-        </View>
+        {/* --- Recent Signals --- */}
+        {executedSignals.length > 0 && (
+            <View style={{marginBottom: 20}}>
+                <Text style={styles.sectionTitle}>Recent Trades</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{paddingLeft: 4}}>
+                    {executedSignals.slice(0, 5).map((sig, i) => (
+                        <View key={i} style={[styles.signalCard, {
+                            borderColor: sig.outcome === 'WIN' ? '#22c55e' : sig.outcome === 'LOSS' ? '#ef4444' : '#64748b'
+                        }]}>
+                            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+                                <Text style={styles.signalPair}>{sig.asset.replace('-OTC', '')}</Text>
+                                <Ionicons name={sig.type === 'CALL' ? "arrow-up" : "arrow-down"} size={14} color={sig.type === 'CALL' ? '#22c55e' : '#ef4444'} />
+                            </View>
+                            <Text style={[styles.signalOutcome, {color: sig.outcome === 'WIN' ? '#22c55e' : sig.outcome === 'LOSS' ? '#ef4444' : '#cbd5e1'}]}>
+                                {sig.outcome || 'PENDING'}
+                            </Text>
+                        </View>
+                    ))}
+                </ScrollView>
+            </View>
+        )}
 
         {/* Controls */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Bot Control</Text>
-          <View style={styles.row}>
-            <Text style={styles.label}>Auto Trade</Text>
+          <Text style={styles.cardTitle}>Control Panel</Text>
+          
+          <View style={styles.controlRow}>
+            <View style={{flex: 1}}>
+                <Text style={styles.controlLabel}>Auto Trading</Text>
+                <Text style={styles.controlSubLabel}>Allow bot to take trades</Text>
+            </View>
             <Switch
-              trackColor={{ false: "#767577", true: "#00ff83" }}
-              thumbColor={autoTrade ? "#f4f3f4" : "#f4f3f4"}
+              trackColor={{ false: "#334155", true: "#00ff83" }}
+              thumbColor={"#f8fafc"}
               onValueChange={(val) => {
                   setAutoTrade(val);
                   updateConfig(val, tradeAmount);
@@ -785,12 +903,15 @@ export default function App() {
             />
           </View>
           
-          <View style={[styles.row, {marginTop: 15}]}>
-             <Text style={styles.label}>Amount</Text>
-             <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                 <TouchableOpacity onPress={() => changeCurrency(currency === 'NGN' ? 'USD' : 'NGN')} style={{marginRight: 10}}>
-                     <Text style={{color: '#00ff83', fontWeight: 'bold'}}>{currency}</Text>
+          <View style={[styles.controlRow, {borderBottomWidth: 0}]}>
+             <View>
+                 <Text style={styles.controlLabel}>Trade Amount</Text>
+                 <TouchableOpacity onPress={() => changeCurrency(currency === 'NGN' ? 'USD' : 'NGN')}>
+                     <Text style={{color: '#00ff83', fontSize: 12, fontWeight: 'bold'}}>Switch to {currency === 'NGN' ? 'USD' : 'NGN'}</Text>
                  </TouchableOpacity>
+             </View>
+             <View style={styles.amountInputContainer}>
+                 <Text style={{color: '#64748b', marginRight: 5, fontWeight: 'bold'}}>{currency}</Text>
                  <TextInput
                     style={styles.amountInput}
                     value={tradeAmount}
@@ -801,24 +922,59 @@ export default function App() {
              </View>
           </View>
 
+          {/* Manual Trade Buttons */}
+          <Text style={[styles.controlLabel, {marginTop: 20, marginBottom: 10}]}>Manual Entry</Text>
+          <View style={{flexDirection: 'row', gap: 12}}>
+            <TouchableOpacity 
+                style={[styles.tradeBtn, {backgroundColor: '#22c55e', flex: 1}]}
+                onPress={() => placeManualTrade('CALL')}
+                disabled={manualTradeLoading}
+            >
+                <View style={{backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 20, marginBottom: 4}}>
+                    <Ionicons name="arrow-up" size={24} color="white" />
+                </View>
+                <Text style={styles.tradeBtnText}>CALL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+                style={[styles.tradeBtn, {backgroundColor: '#ef4444', flex: 1}]}
+                onPress={() => placeManualTrade('PUT')}
+                disabled={manualTradeLoading}
+            >
+                <View style={{backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 20, marginBottom: 4}}>
+                    <Ionicons name="arrow-down" size={24} color="white" />
+                </View>
+                <Text style={styles.tradeBtnText}>PUT</Text>
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity 
-            style={[styles.btnPrimary, {backgroundColor: botRunning ? '#ef4444' : '#00ff83', marginTop: 20}]} 
+            style={[styles.mainActionBtn, {backgroundColor: botRunning ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)', borderColor: botRunning ? '#ef4444' : '#22c55e'}]} 
             onPress={toggleBot}
           >
-            <Text style={[styles.btnTextPrimary, {color: botRunning ? 'white' : '#0f172a'}]}>
-                {botRunning ? 'STOP BOT' : 'START BOT'}
+            <Ionicons name={botRunning ? "stop-circle" : "play-circle"} size={32} color={botRunning ? "#ef4444" : "#22c55e"} style={{marginRight: 10}} />
+            <Text style={[styles.mainActionBtnText, {color: botRunning ? '#ef4444' : '#22c55e'}]}>
+                {botRunning ? 'STOP AUTO-BOT' : 'START AUTO-BOT'}
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Logs */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Logs</Text>
-          <ScrollView style={styles.logsContainer} nestedScrollEnabled>
-            {logs.map((log, index) => (
-              <Text key={index} style={styles.logText}>{log}</Text>
-            ))}
-          </ScrollView>
+          <TouchableOpacity style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}} onPress={() => setShowLogs(!showLogs)}>
+              <Text style={styles.cardTitle}>System Logs</Text>
+              <Ionicons name={showLogs ? "chevron-up" : "chevron-down"} size={20} color="#94a3b8" />
+          </TouchableOpacity>
+          
+          {showLogs && (
+              <ScrollView style={styles.logsContainer} nestedScrollEnabled>
+                {logs.map((log, index) => (
+                  <Text key={index} style={styles.logText}>
+                      <Text style={{color: '#64748b'}}>{log.split(']')[0]}] </Text>
+                      <Text style={{color: '#cbd5e1'}}>{log.split(']').slice(1).join(']')}</Text>
+                  </Text>
+                ))}
+              </ScrollView>
+          )}
         </View>
         
         <View style={{height: 100}} /> 
@@ -1073,5 +1229,104 @@ const styles = StyleSheet.create({
   },
   pairTextActive: {
     color: '#00ff83',
+  },
+  statCardSmall: {
+    flex: 1,
+    backgroundColor: '#1e293b',
+    padding: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f8fafc',
+    marginBottom: 15,
+    marginLeft: 4,
+  },
+  signalCard: {
+    backgroundColor: '#1e293b',
+    padding: 12,
+    borderRadius: 12,
+    marginRight: 12,
+    width: 120,
+    borderWidth: 1,
+  },
+  signalPair: {
+    color: '#cbd5e1',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  signalOutcome: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginTop: 4,
+  },
+  controlRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  controlLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#f8fafc',
+  },
+  controlSubLabel: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  tradeBtn: {
+    padding: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tradeBtnText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  mainActionBtn: {
+    marginTop: 20,
+    padding: 20,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  mainActionBtnText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  chartPairTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: '#f8fafc',
+  },
+  chartPrice: {
+      fontSize: 16,
+      color: '#00ff83',
+      fontWeight: '600',
+  },
+  iconContainer: {
+      padding: 8,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
   },
 });
