@@ -152,6 +152,11 @@ export default function App() {
   const [expoPushToken, setExpoPushToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
+  // --- Auth State ---
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+
   const [rates, setRates] = useState<{[key: string]: number}>({'USD': 1.0, 'NGN': 1650.0, 'EUR': 0.92, 'GBP': 0.77});
   const [logs, setLogs] = useState<string[]>([]);
   const [signals, setSignals] = useState<any[]>([]);
@@ -230,24 +235,61 @@ export default function App() {
   };
 
   // --- API Functions ---
+  const handleBotAuth = async () => {
+    if (!authUsername || !authPassword) {
+        Alert.alert("Error", "Please enter username and password");
+        return;
+    }
+
+    setIsConnecting(true);
+    const endpoint = isRegistering ? '/auth/register' : '/auth/login';
+    try {
+        const response = await fetch(`${API_URL}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: authUsername, password: authPassword })
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+            if (isRegistering) {
+                Alert.alert("Success", "Account created! Please log in.");
+                setIsRegistering(false);
+            } else {
+                // Login Success
+                if (data.token) {
+                    console.log("Bot Login Token:", data.token);
+                    await AsyncStorage.setItem('SESSION_TOKEN', data.token);
+                    setSessionToken(data.token);
+                }
+            }
+        } else {
+            Alert.alert("Error", data.detail || "Authentication failed");
+        }
+    } catch (e) {
+        Alert.alert("Error", "Network request failed");
+    } finally {
+        setIsConnecting(false);
+    }
+  };
+
+  const logoutBot = async () => {
+      await AsyncStorage.removeItem('SESSION_TOKEN');
+      setSessionToken(null);
+      setConnected(false);
+      setBotRunning(false);
+  };
+
   const connectToIq = async () => {
     setIsConnecting(true);
     try {
-      // Connect does NOT need auth token initially, it creates one.
-      const response = await fetch(`${API_URL}/connect`, {
+      // Connect uses authFetch to send the bot token
+      const response = await authFetch(`/connect`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, account_type: accountType })
       });
       const data = await response.json();
       if (data.success) {
-        // SAVE TOKEN
-        if (data.token) {
-            console.log("Saving Token:", data.token);
-            setSessionToken(data.token);
-            await AsyncStorage.setItem('SESSION_TOKEN', data.token);
-        }
-        
         Alert.alert("Success", `Connected to ${accountType} Account!`);
         setConnected(true);
       } else {
@@ -449,12 +491,63 @@ export default function App() {
 
   // --- Render ---
   if (!sessionToken) {
-    // Show Login if not connected AND no token (or token check failed)
+    // Show Bot Login/Register Form
     return (
       <View style={styles.loginContainer}>
         <StatusBar style="light" />
         <View style={styles.loginCard}>
-          <Text style={styles.loginTitle}>BOI Login</Text>
+          <Text style={styles.loginTitle}>{isRegistering ? "Bot Sign Up" : "Bot Login"}</Text>
+          <Text style={{color: '#94a3b8', marginBottom: 20, textAlign: 'center'}}>
+             {isRegistering ? "Create a dedicated bot account" : "Log in to your bot account"}
+          </Text>
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Username"
+            placeholderTextColor="#94a3b8"
+            value={authUsername}
+            onChangeText={setAuthUsername}
+            autoCapitalize="none"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            placeholderTextColor="#94a3b8"
+            value={authPassword}
+            onChangeText={setAuthPassword}
+            secureTextEntry
+          />
+          
+          <TouchableOpacity style={styles.btnPrimary} onPress={handleBotAuth} disabled={isConnecting}>
+            {isConnecting ? (
+                <ActivityIndicator size="small" color="#0f172a" />
+            ) : (
+                <Text style={styles.btnTextPrimary}>{isRegistering ? "Sign Up" : "Log In"}</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={{marginTop: 15}} onPress={() => setIsRegistering(!isRegistering)}>
+             <Text style={{color: '#00ff83', textAlign: 'center'}}>
+                {isRegistering ? "Already have an account? Log In" : "Don't have an account? Sign Up"}
+             </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // If Logged in but NOT Connected to IQ Option
+  if (!connected) {
+     return (
+      <View style={styles.loginContainer}>
+        <StatusBar style="light" />
+        <View style={styles.loginCard}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+             <Text style={styles.loginTitle}>Connect IQ</Text>
+             <TouchableOpacity onPress={logoutBot}>
+                <Ionicons name="log-out-outline" size={24} color="#ef4444" />
+             </TouchableOpacity>
+          </View>
           
           <TextInput
             style={styles.input}
@@ -487,12 +580,12 @@ export default function App() {
             {isConnecting ? (
                 <ActivityIndicator size="small" color="#0f172a" />
             ) : (
-                <Text style={styles.btnTextPrimary}>Connect</Text>
+                <Text style={styles.btnTextPrimary}>Connect IQ Option</Text>
             )}
           </TouchableOpacity>
         </View>
       </View>
-    );
+     );
   }
 
   return (

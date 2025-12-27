@@ -11,12 +11,25 @@ import json
 import uuid
 import yfinance as yf # For currency rates
 from exponent_server_sdk import PushClient, PushMessage
+import sqlite3
+import hashlib
 
 # Import Bot Modules
 import config
 from data_feed import DataFeed
 from strategy_trend import TrendPullbackStrategy
 import indicators
+
+# --- DB Setup ---
+def init_db():
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password_hash TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 app = FastAPI(title="IQ Bot API", description="Backend for Mobile App")
 
@@ -63,10 +76,18 @@ class BotState:
 class SessionManager:
     def __init__(self):
         self.sessions = {} # token -> BotState
+        self.user_sessions = {} # username -> token
 
-    def create_session(self):
+    def create_session(self, username):
+        # Invalidate existing session for this user if any
+        if username in self.user_sessions:
+            old_token = self.user_sessions[username]
+            self.remove_session(old_token)
+
         token = str(uuid.uuid4())
-        self.sessions[token] = BotState(session_id=token)
+        # Use username as session_id to ensure unique file "session_<username>.json"
+        self.sessions[token] = BotState(session_id=username)
+        self.user_sessions[username] = token
         return token
 
     def get_session(self, token: str):
@@ -79,9 +100,59 @@ class SessionManager:
                 self.sessions[token].data_feed.disconnect()
             except:
                 pass
+            
+            # Remove from user_sessions map as well
+            # This is O(N) but N is small (active users). 
+            # Optimization: Store username in BotState or maintain reverse map.
+            # BotState has session_id which IS the username now.
+            username = self.sessions[token].session_id
+            if username in self.user_sessions:
+                del self.user_sessions[username]
+
             del self.sessions[token]
 
 session_manager = SessionManager()
+
+# --- Auth Models ---
+class UserRegister(BaseModel):
+    username: str
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+# --- Auth Endpoints ---
+@app.post("/auth/register")
+def register(user: UserRegister):
+    if len(user.password) < 4:
+         raise HTTPException(status_code=400, detail="Password too short")
+    
+    pwd_hash = hashlib.sha256(user.password.encode()).hexdigest()
+    try:
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (user.username, pwd_hash))
+        conn.commit()
+        conn.close()
+        return {"success": True, "message": "User registered successfully"}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+@app.post("/auth/login")
+def login(user: UserLogin):
+    pwd_hash = hashlib.sha256(user.password.encode()).hexdigest()
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username=? AND password_hash=?", (user.username, pwd_hash))
+    row = c.fetchone()
+    conn.close()
+    
+    if row:
+        token = session_manager.create_session(user.username)
+        return {"success": True, "token": token, "username": user.username}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
 # --- Dependency ---
 async def get_current_bot(request: Request, authorization: str = Header(None), token_query: str = Query(None, alias="token")):
@@ -372,22 +443,19 @@ def read_root():
     return {"status": "IQ Bot API Running", "version": "2.0 Multi-User"}
 
 @app.post("/connect")
-def connect_iq(req: ConnectRequest):
-    # Create new session
-    token = session_manager.create_session()
-    bot_state = session_manager.get_session(token)
-    
+def connect_iq(req: ConnectRequest, bot_state: BotState = Depends(get_current_bot)):
+    # Connect using the EXISTING bot session
     success, message = bot_state.data_feed.connect_iq(req.email, req.password, req.account_type)
+    
     if success:
         bot_state.add_log(f"Connected to IQ Option ({req.account_type})")
-        # Update Account Currency
-        bot_state.account_currency = bot_state.data_feed.get_account_currency() or "USD"
-        bot_state.add_log(f"Account Currency: {bot_state.account_currency}")
+        bot_state.active_pairs = config.PAIRS_OTC # Reset/Init pairs
+        bot_state.account_currency = "USD" # Should fetch real currency
+        bot_state.is_running = False # Don't auto-start
     else:
         bot_state.add_log(f"Connection Failed: {message}")
-        # Optionally remove session if failed? No, let user retry or see logs.
     
-    return {"success": success, "message": message, "token": token}
+    return {"success": success, "message": message}
 
 @app.post("/disconnect")
 def disconnect_iq(bot_state: BotState = Depends(get_current_bot)):
