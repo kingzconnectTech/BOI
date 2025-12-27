@@ -1,4 +1,5 @@
 import uvicorn
+import iq_patch # Patch IQ Option API for multi-user support
 from fastapi import FastAPI, HTTPException, Body, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
