@@ -197,6 +197,8 @@ def bot_loop():
                         df = bot_state.data_feed.fetch_data(symbol=ticker, period="1d", interval=config.ENTRY_TIMEFRAME)
                         
                         if df is None or df.empty:
+                            if ticker == "USDJPY-OTC":
+                                print(f"DEBUG: No data for {ticker}")
                             continue
 
                         # Calculate Indicators

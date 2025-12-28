@@ -216,12 +216,20 @@ class DataFeed:
         Fetches data from yfinance.
         For 1m data, max period is 7d.
         """
-        # ... (Existing yfinance logic) ...
+        target = symbol
+        # Map OTC pairs to standard for YFinance fallback
+        if "OTC" in target:
+            target = target.replace("-OTC", "")
+            # Add =X if not present (common for forex in YF)
+            if "=X" not in target:
+                target += "=X"
+                
         try:
             # yfinance tickers for forex often have =X, e.g. EURUSD=X
             # auto_adjust=False to suppress FutureWarning and keep standard OHLC
-            df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=False)
+            df = yf.download(target, period=period, interval=interval, progress=False, auto_adjust=False)
             if df.empty:
+                print(f"YFinance: No data for {target}")
                 return None
             
             # Clean up MultiIndex columns if present (yfinance update)
