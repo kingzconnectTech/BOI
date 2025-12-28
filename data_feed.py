@@ -193,6 +193,10 @@ class DataFeed:
                          # Raise exception to trigger the catch block below which handles reconnection
                          raise Exception("Connection lost (detected via empty candles + check_connect)")
 
+                    # If we are seemingly connected but still getting empty candles repeatedly (attempt > 0)
+                    if attempt > 0:
+                        raise Exception("Force reconnect: Empty candles received despite valid connection status")
+
                     time.sleep(1) # Small pause if empty but connected
                 except Exception as e:
                     if attempt < max_retries - 1:
@@ -200,15 +204,24 @@ class DataFeed:
                         # Reconnect if we suspect connection dropped
                         # Check if iq_api exists and has check_connect method (standard in iqoptionapi)
                         if self.iq_api:
+                            reconnect_success = False
                             try:
                                 # First, try to ensure we are connected
                                 if not self.iq_api.check_connect():
                                     print("Reconnecting...")
-                                    self.iq_api.connect()
+                                    check, reason = self.iq_api.connect()
+                                    if check:
+                                        print("Simple reconnection successful.")
+                                        reconnect_success = True
                             except Exception as conn_err:
                                 print(f"Reconnection attempt failed: {conn_err}")
-                                # Try full re-initialization if we have credentials
-                                if hasattr(self, 'email') and hasattr(self, 'password'):
+                            
+                            # If simple reconnection worked, we don't need full re-init
+                            if reconnect_success:
+                                continue
+
+                            # Try full re-initialization if we have credentials
+                            if hasattr(self, 'email') and hasattr(self, 'password'):
                                     try:
                                         print("Attempting full re-initialization of IQ Option instance...")
                                         # Close old one if possible
