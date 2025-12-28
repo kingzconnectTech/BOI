@@ -139,6 +139,44 @@ class DataFeed:
         except Exception as e:
             return False, str(e)
 
+    def get_balance(self):
+        """
+        Safely gets the balance, handling reconnection if needed.
+        """
+        if not self.use_iq or not self.is_connected:
+            return 0.0
+
+        try:
+            return self.iq_api.get_balance()
+        except Exception as e:
+            print(f"Get Balance Error: {e}")
+            # Try to reconnect
+            try:
+                if self.iq_api and not self.iq_api.check_connect():
+                    print("Connection lost during get_balance. Reconnecting...")
+                    check, reason = self.iq_api.connect()
+                    if check:
+                        print("Reconnected.")
+                        self.is_connected = True
+                        return self.iq_api.get_balance()
+                    else:
+                        # Full re-init logic (simplified version of _fetch_iq_data)
+                        if hasattr(self, 'email') and hasattr(self, 'password'):
+                             print("Attempting full re-init in get_balance...")
+                             self.iq_api = IQ_Option(self.email, self.password)
+                             check, _ = self.iq_api.connect()
+                             if check:
+                                 self.is_connected = True
+                                 if hasattr(self, 'account_type'):
+                                     self.iq_api.change_balance(self.account_type.upper())
+                                 return self.iq_api.get_balance()
+            except Exception as re_err:
+                print(f"Reconnection in get_balance failed: {re_err}")
+            
+            # If all fails
+            self.is_connected = False
+            return 0.0
+
     def fetch_data(self, symbol=None, period="5d", interval="1m"):
         """
         Fetches data. If connected to IQ Option, fetches from there.

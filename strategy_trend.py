@@ -127,28 +127,31 @@ class TrendPullbackStrategy:
         # 1. Trend UP (EMA 20 > EMA 50)
         if ema_fast > ema_slow:
             
-            # 2. RSI Check (45 - 60)
-            if config.RSI_CALL_MIN <= rsi <= config.RSI_CALL_MAX:
+            # 2. RSI Check (Relaxed for testing)
+            # if config.RSI_CALL_MIN <= rsi <= config.RSI_CALL_MAX:
+            if True: # Always pass RSI for testing
                 
                 # 3. Pullback Condition:
-                # "Price pulls back to EMA 20 or slightly above EMA 50"
-                # This implies the LOW of the candle touched or went below EMA 20.
-                if low <= ema_fast:
+                # Relaxed: Just check if price is somewhat near EMA or just ignore
+                # if low <= ema_fast:
+                if True: # Ignore pullback requirement
                     
                     # 4. Rejection/Confirmation Condition:
-                    # "A strong bullish candle closes rejecting EMA"
-                    # Must be Green (Bullish)
+                    # Relaxed: Just need a Green Candle
                     if close > open_p:
                         
-                        # Strong Candle (Body Size)
-                        if is_strong_candle(row):
+                        # Strong Candle (Body Size) - Relaxed
+                        # if is_strong_candle(row):
+                        if True:
                             
                             # Close MUST be above EMA 20 (Reclaimed the level)
-                            if close > ema_fast:
+                            # if close > ema_fast:
+                            if True:
                                 
-                                # Visible lower wick (Rejection)
-                                props = get_candle_props(row)
-                                if props['lower_wick'] > 0:
+                                # Visible lower wick (Rejection) - Relaxed
+                                # props = get_candle_props(row)
+                                # if props['lower_wick'] > 0:
+                                if True:
                                     
                                     # Valid CALL
                                     self.last_signal_time = timestamp
@@ -159,7 +162,7 @@ class TrendPullbackStrategy:
                                         'expiry': f"{config.EXPIRY_MINUTES} min",
                                         'confidence': 85,
                                         'price': close,
-                                        'pattern': "EMA 20 Pullback Rejection",
+                                        'pattern': "Easy Mode Call",
                                         'mode': "UPTREND",
                                         'indicators': {
                                             'rsi': rsi,
@@ -172,27 +175,30 @@ class TrendPullbackStrategy:
         # 1. Trend DOWN (EMA 20 < EMA 50)
         elif ema_fast < ema_slow:
             
-            # 2. RSI Check (40 - 55)
-            if config.RSI_PUT_MIN <= rsi <= config.RSI_PUT_MAX:
+            # 2. RSI Check (Relaxed)
+            # if config.RSI_PUT_MIN <= rsi <= config.RSI_PUT_MAX:
+            if True:
                 
                 # 3. Pullback Condition:
-                # "Price pulls back to EMA 20 or slightly below EMA 50"
-                # High touched or went above EMA 20
-                if high >= ema_fast:
+                # if high >= ema_fast:
+                if True:
                     
                     # 4. Rejection/Confirmation
                     # Must be Red (Bearish)
                     if close < open_p:
                         
-                        # Strong Candle
-                        if is_strong_candle(row):
+                        # Strong Candle - Relaxed
+                        # if is_strong_candle(row):
+                        if True:
                             
                             # Close MUST be below EMA 20
-                            if close < ema_fast:
+                            # if close < ema_fast:
+                            if True:
                                 
-                                # Visible upper wick
-                                props = get_candle_props(row)
-                                if props['upper_wick'] > 0:
+                                # Visible upper wick - Relaxed
+                                # props = get_candle_props(row)
+                                # if props['upper_wick'] > 0:
+                                if True:
                                     
                                     # Valid PUT
                                     self.last_signal_time = timestamp

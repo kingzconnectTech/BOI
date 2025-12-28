@@ -456,22 +456,12 @@ def get_exchange_rates():
 
 @app.get("/status")
 def get_status(bot_state: BotState = Depends(get_current_bot)):
-    # Safely get balance
-    balance = 0
+    # Safely get balance using DataFeed's resilient method
+    balance = bot_state.data_feed.get_balance()
     
-    # If explicitly marked as disconnected, trust it
-    if not bot_state.data_feed.is_connected:
-         # Double check real state if possible? No, trust the flag.
-         pass
-    elif bot_state.data_feed.iq_api:
-        try:
-            # Try to get balance. If this fails, we might be disconnected.
-            balance = bot_state.data_feed.iq_api.get_balance()
-        except Exception as e:
-            print(f"Status Check Error: {e}")
-            # If get_balance fails, it's a strong sign we are disconnected
-            bot_state.data_feed.is_connected = False
-            bot_state.add_log("Disconnected detected during status check")
+    # If balance is 0 and we think we are connected, it might be a real 0 balance 
+    # OR a connection failure that get_balance() couldn't recover from (which sets is_connected=False).
+    # So we trust bot_state.data_feed.is_connected updated by get_balance().
 
     return {
         "is_running": bot_state.is_running,

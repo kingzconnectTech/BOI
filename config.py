@@ -26,12 +26,12 @@ ZONE_TOUCH_TOLERANCE_ATR = 0.5
 
 # --- Entry Filters ---
 EXPIRY_MINUTES = 2 # 2 Minutes Expiry
-SIGNAL_COOLDOWN_CANDLES = 3
+SIGNAL_COOLDOWN_CANDLES = 0 # Reduced for testing
 
 # --- Session & Risk ---
-MAX_TRADES_PER_SESSION = 6
-STOP_LOSS_LIMIT = 2 # Consecutive losses to stop
-SESSION_PROFIT_GOAL = 5 # Stop at $5 profit
+MAX_TRADES_PER_SESSION = 20 # Increased for testing
+STOP_LOSS_LIMIT = 10 # Increased for testing
+SESSION_PROFIT_GOAL = 50 # Increased for testing
 TRADE_AMOUNT = 1.0 # $1 per trade
 
 # --- Sessions (UTC) ---
