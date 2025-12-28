@@ -520,7 +520,7 @@ export default function App() {
       setAutoTrade(statusData.auto_trade);
       setBalance(statusData.balance);
       setSessionProfit(statusData.session_profit || 0.0);
-      setLogs(statusData.logs.reverse()); // Newest first
+      setLogs([...(statusData.logs || [])].reverse()); // Newest first, avoid mutating source
       
       if (statusData.config) {
            // Only update if not editing settings
@@ -585,10 +585,11 @@ export default function App() {
   }, [serverIp, selectedChartPair, showSettings, sessionToken]); // Restart poll if key deps change
 
   // Calculate Win Rate
-  const executedSignals = signals.filter(s => s.status === 'EXECUTED' || s.outcome === 'WIN' || s.outcome === 'LOSS');
-  const wins = executedSignals.filter(s => s.outcome === 'WIN').length;
-  const losses = executedSignals.filter(s => s.outcome === 'LOSS').length;
-  const winRate = executedSignals.length > 0 ? ((wins / (wins + losses)) * 100).toFixed(0) : 0;
+  const outcomeSignals = signals.filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+  const wins = outcomeSignals.filter(s => s.outcome === 'WIN').length;
+  const losses = outcomeSignals.filter(s => s.outcome === 'LOSS').length;
+  const winRateVal = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0;
+  const winRate = isNaN(winRateVal) ? 0 : winRateVal.toFixed(0);
 
   // --- Render ---
   if (!sessionToken) {
@@ -944,11 +945,11 @@ export default function App() {
         </View>
 
         {/* --- Recent Signals --- */}
-        {executedSignals.length > 0 && (
+        {outcomeSignals.length > 0 && (
             <View style={{marginBottom: 20}}>
                 <Text style={styles.sectionTitle}>Recent Trades</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{paddingLeft: 4}}>
-                    {executedSignals.slice(0, 5).map((sig, i) => (
+                    {outcomeSignals.slice(0, 5).map((sig, i) => (
                         <View key={i} style={[styles.signalCard, {
                             borderColor: sig.outcome === 'WIN' ? '#22c55e' : sig.outcome === 'LOSS' ? '#ef4444' : '#64748b'
                         }]}>
