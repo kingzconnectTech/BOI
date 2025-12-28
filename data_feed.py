@@ -191,8 +191,31 @@ class DataFeed:
                 except Exception as e:
                     print(f"IQ Option Data Error (Attempt {attempt}): {e}")
                     
+                    # Check for specific "need reconnect" or similar hard failures
+                    err_str = str(e).lower()
+                    if "reconnect" in err_str or "closed" in err_str:
+                        print("Critical Connection Error Detected. Forcing Reset.")
+                        self.is_connected = False
+                        
+                        # Aggressive Reset
+                        try: self.iq_api.close() 
+                        except: pass
+                        
+                        try:
+                            # Re-instantiate
+                            if hasattr(self, 'email') and hasattr(self, 'password'):
+                                self.iq_api = IQ_Option(self.email, self.password)
+                                check, reason = self.iq_api.connect()
+                                if check:
+                                    print("Re-init success after critical error.")
+                                    self.is_connected = True
+                                    self.iq_api.change_balance(self.account_type.upper())
+                                    continue # Try fetching again immediately
+                        except Exception as crit_err:
+                            print(f"Critical Reset Failed: {crit_err}")
+                    
                     if attempt < max_retries - 1:
-                        time.sleep(1)
+                        time.sleep(2) # Increased sleep
                         if self.iq_api:
                             reconnect_success = False
                             self.is_connected = False 

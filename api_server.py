@@ -66,6 +66,10 @@ class BotState:
         self.loss_memory = [] # Stores conditions of losing trades
         self.logs = []
         self.push_tokens = set() # User-specific push tokens
+        
+        # Trade throttling
+        self.last_trade_time = 0
+        self.trade_cooldown = 30 # seconds between trades
 
     def add_log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -312,6 +316,9 @@ def bot_loop():
                                     if not bot_state.data_feed.is_connected:
                                         bot_state.add_log(f"Skipped Auto-Trade {ticker}: Not Connected")
                                         bot_state.signals[-1]['status'] = 'SKIPPED'
+                                    elif time.time() - bot_state.last_trade_time < bot_state.trade_cooldown:
+                                        bot_state.add_log(f"Skipped Auto-Trade {ticker}: Cooldown Active")
+                                        bot_state.signals[-1]['status'] = 'SKIPPED'
                                     else:
                                         bot_state.add_log(f"Executing Auto-Trade: {ticker} {signal['type']}")
                                         
@@ -330,6 +337,7 @@ def bot_loop():
                                             )
                                             
                                             if success:
+                                                bot_state.last_trade_time = time.time()
                                                 break
                                             
                                             bot_state.add_log(f"Execution Retry {attempt+1}/{max_retries} Failed: {msg}")
