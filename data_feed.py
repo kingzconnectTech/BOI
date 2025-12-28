@@ -54,6 +54,11 @@ class DataFeed:
         Connects to IQ Option API.
         account_type: "PRACTICE" or "REAL"
         """
+        # Store credentials for potential re-connection/re-initialization
+        self.email = email
+        self.password = password
+        self.account_type = account_type
+
         # Ensure previous session is cleared
         self.disconnect()
 
@@ -188,9 +193,26 @@ class DataFeed:
                                     self.iq_api.connect()
                             except Exception as conn_err:
                                 print(f"Reconnection attempt failed: {conn_err}")
-                                # If internal structures are messed up (like NoneType connected),
-                                # we might need to fully re-init or just catch and retry next loop
-                                pass
+                                # Try full re-initialization if we have credentials
+                                if hasattr(self, 'email') and hasattr(self, 'password'):
+                                    try:
+                                        print("Attempting full re-initialization of IQ Option instance...")
+                                        # Close old one if possible
+                                        try:
+                                            self.iq_api.close()
+                                        except:
+                                            pass
+                                        
+                                        self.iq_api = IQ_Option(self.email, self.password)
+                                        check, reason = self.iq_api.connect()
+                                        if check:
+                                            print("Full re-initialization success.")
+                                            if hasattr(self, 'account_type'):
+                                                self.iq_api.change_balance(self.account_type.upper())
+                                        else:
+                                            print(f"Full re-initialization failed: {reason}")
+                                    except Exception as reinit_err:
+                                        print(f"Full re-initialization exception: {reinit_err}")
                         continue
                     print(f"IQ Option Data Error (Retried): {e}")
                     return None
