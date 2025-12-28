@@ -199,10 +199,28 @@ class DataFeed:
                             if reconnect_success:
                                 continue
 
-                            # Fallback to Full Re-initialization
-                            if hasattr(self, 'email') and hasattr(self, 'password'):
-                                    try:
-                                        print("Attempting full re-initialization of IQ Option instance...")
+                            # Fallback to Reconnection (Avoid creating new instance if possible)
+                            try:
+                                print("Attempting reconnection...")
+                                # Try to close and reconnect
+                                # self.iq_api.close() # close() might clear data?
+                                
+                                # Just call connect() - it handles reconnection
+                                check, reason = self.iq_api.connect()
+                                
+                                if check:
+                                    print("Reconnection success.")
+                                    self.is_connected = True
+                                    if hasattr(self, 'account_type'):
+                                        self.iq_api.change_balance(self.account_type.upper())
+                                else:
+                                    print(f"Reconnection failed: {reason}")
+                                    
+                                    # Only if simple reconnect fails, try full re-init (Nuclear option)
+                                    # But ONLY if we don't have active trades? 
+                                    # Actually, if connection is dead, we have to re-init.
+                                    if attempt > 1: # Only on last attempt
+                                        print("Reconnection failed. Attempting full re-initialization...")
                                         try:
                                             self.iq_api.close()
                                             if os.path.exists("session.json"):
@@ -213,14 +231,10 @@ class DataFeed:
                                         self.iq_api = IQ_Option(self.email, self.password)
                                         check, reason = self.iq_api.connect()
                                         if check:
-                                            print("Full re-initialization success.")
                                             self.is_connected = True
-                                            if hasattr(self, 'account_type'):
-                                                self.iq_api.change_balance(self.account_type.upper())
-                                        else:
-                                            print(f"Full re-initialization failed: {reason}")
-                                    except Exception as reinit_err:
-                                        print(f"Full re-initialization exception: {reinit_err}")
+                                            self.iq_api.change_balance(self.account_type.upper())
+                            except Exception as reinit_err:
+                                print(f"Reconnection exception: {reinit_err}")
                         continue
                     print(f"IQ Option Data Error (Retried): {e}")
                     return None
@@ -334,82 +348,42 @@ class DataFeed:
             
         try:
             # Method 1: Check if trade is in 'socket_option_opened' (Real-time updates)
-            # This dictionary usually contains open and recently closed trades
             if hasattr(self.iq_api, 'socket_option_opened'):
                 trades = self.iq_api.socket_option_opened
                 if trades:
-                    # IQ Option API stores trades by ID (int or str)
-                    # We need to find our trade_id
                     tid = int(trade_id)
-                    
                     # Check if we can find it directly
                     trade_data = trades.get(tid) or trades.get(str(tid))
                     
                     if trade_data:
-                        # Check status
-                        # If 'win' is present, it's closed?
-                        # Or check 'msg' -> 'status'
-                        
-                        # Note: Structure varies by API version, but usually:
-                        # trade_data = {'id': ..., 'profit_amount': ..., 'win_amount': ..., ...}
-                        
-                        # Let's try to interpret common fields
-                        win_amount = trade_data.get('win_amount')
-                        if win_amount is not None:
-                            # It's likely closed
-                             # If win_amount is None or 'null', it might be open
-                             pass
-                        
-            # Method 2: Use get_option_open_by_other_pc() (which returns open options)
-            # If trade is NOT in open options, it might be closed.
-            # But we need the result.
-            
-            # Method 3: Check history (v3) - but non-blocking?
-            # get_betinfo might be useful?
-            
-            # Let's try a safer approach:
-            # 1. Check if it's still open
-            # 2. If not open, check result in history
-            
-            # But to be safe and avoid blocking, let's just use get_balance change? No, unreliable.
-            
-            # Let's use the 'check_win_v3' but with a timeout logic or just try-except-pass
-            # Actually, check_win_v3 IS blocking in most implementations.
-            
-            # Better implementation: Check P&L history
-            # Fetch latest 10 trades
-            
-            # Check if trade is expired based on time?
-            # If trade time + duration < current time, it SHOULD be closed.
-            # Then we can query result.
-            
-            pass
-            
-            # Fallback to history check (which is safer than blocking)
-            history = self.iq_api.get_option_open_by_other_pc()
-            
-            if history and isinstance(history, dict):
-                tid = int(trade_id)
-                for k, v in history.items():
-                    try:
-                        k_int = int(k)
-                    except ValueError:
-                        continue
-                    
-                    if k_int == tid:
-                        # Found the trade
-                        # Check if it has a result
-                        # If 'win_amount' is present and not None
-                        win_amount = v.get('win_amount')
-                        if win_amount is not None:
-                             profit = win_amount - v.get('amount', 0)
+                         win_amount = trade_data.get('win_amount')
+                         if win_amount is not None and str(win_amount).lower() != 'null':
+                             profit = float(win_amount) - float(trade_data.get('amount', 0))
                              if profit > 0: return 'WIN'
                              elif profit < 0: return 'LOSS'
                              else: return 'TIE'
-                        
-                        # If close_time is passed
-                        # ...
-            
+
+            # Method 2: Check Open Options (To see if it's still running)
+            # This helps if socket_option_opened is empty (e.g. after reconnect)
+            try:
+                open_options = self.iq_api.get_option_open_by_other_pc()
+                if open_options and isinstance(open_options, dict):
+                    tid = int(trade_id)
+                    for k, v in open_options.items():
+                        try:
+                            if int(k) == tid:
+                                # Found in open options
+                                win_amount = v.get('win_amount')
+                                if win_amount is not None and str(win_amount).lower() != 'null':
+                                    profit = float(win_amount) - float(v.get('amount', 0))
+                                    if profit > 0: return 'WIN'
+                                    elif profit < 0: return 'LOSS'
+                                    else: return 'TIE'
+                                # If found but no result, it is PENDING
+                                return 'PENDING' 
+                        except: continue
+            except: pass
+
             return 'PENDING'
 
         except Exception as e:
