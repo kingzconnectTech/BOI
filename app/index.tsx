@@ -222,10 +222,20 @@ export default function App() {
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           ...options.headers,
       };
-      return fetch(url, {
+      const response = await fetch(url, {
           ...options,
           headers,
       });
+
+      if (response.status === 401) {
+          console.log("Session Expired (401). Logging out...");
+          setSessionToken(null);
+          await AsyncStorage.removeItem('SESSION_TOKEN');
+          Alert.alert("Session Expired", "Please log in again.");
+          throw new Error("Session Expired");
+      }
+
+      return response;
   };
 
   useEffect(() => {
@@ -367,11 +377,13 @@ export default function App() {
       if (!response.ok) {
           throw new Error("Request failed");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       // Revert on error
       setBotRunning(previousState);
-      Alert.alert("Error", "Failed to toggle bot");
+      if (error.message !== "Session Expired") {
+        Alert.alert("Error", "Failed to toggle bot");
+      }
     }
   };
 
