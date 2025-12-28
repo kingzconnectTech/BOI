@@ -46,8 +46,10 @@ OTC_WINDOW_2_END = time(21, 0)
 PAIRS_OTC = [
     "EURUSD-OTC", 
     "GBPUSD-OTC",
-    "USDJPY-OTC",
-    "EURGBP-OTC"
+    "EURGBP-OTC",
+    "USDCHF-OTC",
+    "AUDUSD-OTC",
+    "EURAUD-OTC"
 ]
 
 # (Legacy/Unused for this specific strategy but kept to avoid import errors)

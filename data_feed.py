@@ -367,6 +367,8 @@ class DataFeed:
             pass
 
         try:
+            print(f"[DEBUG] Executing Trade for {iq_symbol} | Mode: {trade_mode} | Action: {action} | Amount: {amount}")
+
             # Helper for Digital Execution
             def try_digital():
                 # Digital usually supports 1, 5, 15 minutes.
@@ -380,22 +382,28 @@ class DataFeed:
                 # Check if asset is open for Digital (Instrument ID lookup)
                 # Sometimes buy_digital_spot fails if asset name is slightly off or unavailable
                 
+                print(f"[DEBUG] Attempting DIGITAL for {iq_symbol} duration {digital_duration}m")
                 # buy_digital_spot args: (active, amount, action, duration)
                 check, trade_id = self.iq_api.buy_digital_spot(iq_symbol, amount, action_lower, digital_duration)
                 
                 if check:
+                    print(f"[DEBUG] DIGITAL Success: ID {trade_id}")
                     return True, {'id': trade_id, 'type': 'DIGITAL'}, f"Digital Trade Executed! ID: {trade_id} (Duration: {digital_duration}m)"
                 
                 # If failed, trade_id often contains the error message/reason
+                print(f"[DEBUG] DIGITAL Failed: {trade_id}")
                 return False, None, f"Digital Failed: {trade_id}"
 
             # Helper for Binary Execution
             def try_binary():
                 # check if pair is open
+                print(f"[DEBUG] Attempting BINARY for {iq_symbol} duration {duration}m")
                 check, trade_id = self.iq_api.buy(amount, iq_symbol, action_lower, duration)
                 if check:
+                    print(f"[DEBUG] BINARY Success: ID {trade_id}")
                     return True, {'id': trade_id, 'type': 'BINARY'}, f"Binary Trade Executed! ID: {trade_id}"
                 
+                print(f"[DEBUG] BINARY Failed: {trade_id}")
                 return False, None, f"Binary Failed: {trade_id}"
 
             # Execution Logic based on Mode
@@ -414,13 +422,16 @@ class DataFeed:
                 # Log that Binary failed
                 binary_msg = msg
                 
+                print(f"[DEBUG] Auto-Trade Fallback: Binary failed ({binary_msg}), trying Digital...")
+                
                 success, details, msg = try_digital()
                 if success:
                     return True, details, msg
                 else:
                     return False, None, f"Execution Failed. {binary_msg} | {msg}"
-
+        
         except Exception as e:
+            print(f"[DEBUG] Execution Exception: {e}")
             return False, None, f"Execution Error: {e}"
 
     def check_trade_result(self, trade_id, trade_type):

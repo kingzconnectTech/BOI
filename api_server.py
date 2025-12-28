@@ -379,7 +379,7 @@ class ConfigRequest(BaseModel):
     expiry_minutes: int = 2
     stop_loss: int = 2
     profit_goal: float = 5.0
-    active_pairs: list = ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC"]
+    active_pairs: list = ["EURUSD-OTC", "GBPUSD-OTC"]
 
 class PushToken(BaseModel):
     token: str

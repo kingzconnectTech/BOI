@@ -68,7 +68,7 @@ Notifications.setNotificationHandler({
 });
 
 const AVAILABLE_PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC", 
+    "EURUSD-OTC", "GBPUSD-OTC", 
     "EURGBP-OTC"
 ];
 
@@ -156,7 +156,7 @@ export default function App() {
   const [showAdvice, setShowAdvice] = useState(false);
   
   // Chart & Pairs State
-  const [activePairs, setActivePairs] = useState<string[]>(["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC"]);
+  const [activePairs, setActivePairs] = useState<string[]>(["EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "AUDUSD-OTC", "EURAUD-OTC"]);
   const [selectedChartPair, setSelectedChartPair] = useState("EURUSD-OTC");
   const [chartType, setChartType] = useState('AREA'); // 'LINE' or 'AREA'
   const [expoPushToken, setExpoPushToken] = useState('');
@@ -324,7 +324,9 @@ export default function App() {
 
   const disconnectFromIq = async () => {
     try {
-      await authFetch('/disconnect', { method: 'POST' });
+      // Fire and forget - don't wait for server response
+      authFetch('/disconnect', { method: 'POST' }).catch(err => console.log("Disconnect log:", err));
+      
       await AsyncStorage.removeItem('SESSION_TOKEN');
       setSessionToken(null);
       setConnected(false);
@@ -336,12 +338,23 @@ export default function App() {
   };
 
   const toggleBot = async () => {
-    const endpoint = botRunning ? '/stop' : '/start';
+    const previousState = botRunning;
+    const newState = !previousState;
+    
+    // Optimistic Update
+    setBotRunning(newState);
+    
+    const endpoint = previousState ? '/stop' : '/start';
     try {
-      await authFetch(endpoint, { method: 'POST' });
-      setBotRunning(!botRunning);
+      const response = await authFetch(endpoint, { method: 'POST' });
+      if (!response.ok) {
+          throw new Error("Request failed");
+      }
     } catch (error) {
       console.error(error);
+      // Revert on error
+      setBotRunning(previousState);
+      Alert.alert("Error", "Failed to toggle bot");
     }
   };
 
@@ -745,17 +758,57 @@ export default function App() {
                         {/* Best Window */}
                         <View style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: 'rgba(34, 197, 94, 0.3)'}}>
                             <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
-                                <Ionicons name="checkmark-circle" size={20} color="#22c55e" style={{marginRight: 8}} />
-                                <Text style={{color: '#22c55e', fontWeight: 'bold', fontSize: 15}}>BEST WINDOW (MOST STABLE)</Text>
+                                <Ionicons name="time-outline" size={20} color="#22c55e" style={{marginRight: 8}} />
+                                <Text style={{color: '#22c55e', fontWeight: 'bold', fontSize: 15}}>BEST TRADING WINDOW (WAT)</Text>
                             </View>
-                            <Text style={{color: 'white', fontWeight: 'bold', fontSize: 20, marginBottom: 8, textAlign: 'center'}}>22:00 – 02:00 WAT</Text>
-                            <Text style={{color: '#94a3b8', fontSize: 12, marginBottom: 5, fontWeight: 'bold'}}>Why this works:</Text>
-                            {['Lower global retail activity', 'Less algorithm aggression', 'Cleaner ranges', 'Fewer fake spikes'].map((item, i) => (
-                                <View key={i} style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
-                                    <View style={{width: 4, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1', marginRight: 8}} />
-                                    <Text style={{color: '#cbd5e1', fontSize: 13}}>{item}</Text>
+                            <Text style={{color: 'white', fontWeight: 'bold', fontSize: 24, marginBottom: 8, textAlign: 'center'}}>22:00 – 02:00 WAT</Text>
+                            <Text style={{color: '#94a3b8', fontSize: 12, textAlign: 'center', marginBottom: 15}}>Most stable market conditions for OTC.</Text>
+
+                            {/* TIER 1 */}
+                            <View style={{marginBottom: 15}}>
+                                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 5}}>
+                                    <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e', marginRight: 6}} />
+                                    <Text style={{color: '#22c55e', fontWeight: 'bold', fontSize: 14}}>TIER 1 – MOST STABLE</Text>
                                 </View>
-                            ))}
+                                <View style={{backgroundColor: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 8}}>
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>EUR/USD OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11, marginBottom: 5}}>22:00–02:00 • Most stable OTC pair</Text>
+                                    
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>GBP/USD OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11}}>22:00–02:00 • Reliable but slightly volatile</Text>
+                                </View>
+                            </View>
+
+                            {/* TIER 2 */}
+                            <View style={{marginBottom: 15}}>
+                                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 5}}>
+                                    <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: '#eab308', marginRight: 6}} />
+                                    <Text style={{color: '#eab308', fontWeight: 'bold', fontSize: 14}}>TIER 2 – STABLE</Text>
+                                </View>
+                                <View style={{backgroundColor: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 8}}>
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>EUR/GBP OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11, marginBottom: 5}}>22:00–02:00 • Very range-bound</Text>
+                                    
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>USD/CHF OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11}}>22:00–02:00 • Slow, clean movements</Text>
+                                </View>
+                            </View>
+
+                            {/* TIER 3 */}
+                            <View>
+                                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 5}}>
+                                    <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444', marginRight: 6}} />
+                                    <Text style={{color: '#ef4444', fontWeight: 'bold', fontSize: 14}}>TIER 3 – CONDITIONAL (EXPERT)</Text>
+                                </View>
+                                <View style={{backgroundColor: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 8}}>
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>AUD/USD OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11, marginBottom: 5}}>22:30–01:30 • Avoid if candles spike</Text>
+                                    
+                                    <Text style={{color: '#e2e8f0', fontWeight: 'bold'}}>EUR/AUD OTC</Text>
+                                    <Text style={{color: '#94a3b8', fontSize: 11}}>22:30–01:30 • Needs strong wick rejection</Text>
+                                </View>
+                            </View>
+
                         </View>
                         
                         {/* Other content omitted for brevity but should be kept */}
