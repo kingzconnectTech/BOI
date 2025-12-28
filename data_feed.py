@@ -511,7 +511,13 @@ class DataFeed:
                     # We need to cast trade_id to int or str to match
                     tid = int(trade_id)
                     for k, v in history.items():
-                        if int(k) == tid:
+                        # Safely skip non-integer keys (like 'name', 'msg', etc.)
+                        try:
+                            k_int = int(k)
+                        except ValueError:
+                            continue
+
+                        if k_int == tid:
                             # Found the trade
                             # v usually contains: 'win', 'amount', 'profit', etc.
                             # 'win': 'win' / 'loose' / 'equal'?
