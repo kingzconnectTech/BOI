@@ -193,13 +193,16 @@ class DataFeed:
                     
                     # Check for specific "need reconnect" or similar hard failures
                     err_str = str(e).lower()
-                    if "reconnect" in err_str or "closed" in err_str:
+                    if "reconnect" in err_str or "closed" in err_str or "ssl" in err_str:
                         print("Critical Connection Error Detected. Forcing Reset.")
                         self.is_connected = False
                         
                         # Aggressive Reset
                         try: self.iq_api.close() 
                         except: pass
+                        
+                        self.iq_api = None
+                        time.sleep(2) # Give it a moment
                         
                         try:
                             # Re-instantiate
@@ -211,6 +214,8 @@ class DataFeed:
                                     self.is_connected = True
                                     self.iq_api.change_balance(self.account_type.upper())
                                     continue # Try fetching again immediately
+                                else:
+                                    print(f"Re-init failed: {reason}")
                         except Exception as crit_err:
                             print(f"Critical Reset Failed: {crit_err}")
                     
@@ -378,6 +383,8 @@ class DataFeed:
             else:
                 return False, None, "Trade Failed (API returned False)"
         except Exception as e:
+            print(f"Execution Error: {e}")
+            self.is_connected = False # Mark as disconnected to trigger reconnect
             return False, None, f"Execution Error: {e}"
 
     def check_trade_result(self, trade_id, trade_type="BINARY"):
