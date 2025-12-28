@@ -171,15 +171,24 @@ class DataFeed:
 
     def fetch_data(self, symbol=None, period="5d", interval="1m"):
         """
-        Fetches data. If connected to IQ Option, fetches from there.
-        Otherwise falls back to yfinance.
+        Fetches data with resilient fallback:
+        - Try IQ Option first if connected.
+        - If IQ returns None/empty, fallback to yfinance to keep UI and strategy alive.
         """
         target_symbol = symbol if symbol else self.symbol
         
+        df = None
         if self.use_iq and self.is_connected:
-            return self._fetch_iq_data(target_symbol, interval)
-        else:
-            return self._fetch_yf_data(target_symbol, period, interval)
+            df = self._fetch_iq_data(target_symbol, interval)
+            if df is not None and not df.empty:
+                return df
+            # If IQ failed, try to recover softly once
+            self.ensure_connection(mode="soft")
+            df = self._fetch_iq_data(target_symbol, interval)
+            if df is not None and not df.empty:
+                return df
+        # Final fallback to yfinance
+        return self._fetch_yf_data(target_symbol, period, interval)
 
     def _fetch_iq_data(self, symbol, interval):
         """
