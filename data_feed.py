@@ -182,14 +182,15 @@ class DataFeed:
                         # Check if iq_api exists and has check_connect method (standard in iqoptionapi)
                         if self.iq_api:
                             try:
+                                # First, try to ensure we are connected
                                 if not self.iq_api.check_connect():
+                                    print("Reconnecting...")
                                     self.iq_api.connect()
-                            except AttributeError:
-                                # Fallback if check_connect doesn't exist or other error
-                                try:
-                                    self.iq_api.connect()
-                                except:
-                                    pass
+                            except Exception as conn_err:
+                                print(f"Reconnection attempt failed: {conn_err}")
+                                # If internal structures are messed up (like NoneType connected),
+                                # we might need to fully re-init or just catch and retry next loop
+                                pass
                         continue
                     print(f"IQ Option Data Error (Retried): {e}")
                     return None
