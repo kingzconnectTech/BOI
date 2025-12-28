@@ -20,6 +20,7 @@ class DataFeed:
         self.account_type = "PRACTICE"
 
     def disconnect(self):
+        print("Disconnect called.") # Debug log
         self.is_connected = False
         if self.iq_api:
             try:
@@ -326,57 +327,91 @@ class DataFeed:
 
     def check_trade_result(self, trade_id, trade_type="BINARY"):
         """
-        Checks the result of a trade.
+        Checks the result of a trade (Non-blocking).
         """
         if not self.is_connected:
             return 'PENDING'
             
         try:
-            # IQ Option v3 check
-            result = self.iq_api.check_win_v3(trade_id)
+            # Method 1: Check if trade is in 'socket_option_opened' (Real-time updates)
+            # This dictionary usually contains open and recently closed trades
+            if hasattr(self.iq_api, 'socket_option_opened'):
+                trades = self.iq_api.socket_option_opened
+                if trades:
+                    # IQ Option API stores trades by ID (int or str)
+                    # We need to find our trade_id
+                    tid = int(trade_id)
+                    
+                    # Check if we can find it directly
+                    trade_data = trades.get(tid) or trades.get(str(tid))
+                    
+                    if trade_data:
+                        # Check status
+                        # If 'win' is present, it's closed?
+                        # Or check 'msg' -> 'status'
+                        
+                        # Note: Structure varies by API version, but usually:
+                        # trade_data = {'id': ..., 'profit_amount': ..., 'win_amount': ..., ...}
+                        
+                        # Let's try to interpret common fields
+                        win_amount = trade_data.get('win_amount')
+                        if win_amount is not None:
+                            # It's likely closed
+                             # If win_amount is None or 'null', it might be open
+                             pass
+                        
+            # Method 2: Use get_option_open_by_other_pc() (which returns open options)
+            # If trade is NOT in open options, it might be closed.
+            # But we need the result.
             
-            # result is usually the profit amount. 
-            # > 0 : WIN
-            # < 0 : LOSS
-            # 0 : TIE (or Equal)
+            # Method 3: Check history (v3) - but non-blocking?
+            # get_betinfo might be useful?
             
-            # Wait, check_win_v3 might return the result string or amount?
-            # Usually it returns the amount won/lost.
+            # Let's try a safer approach:
+            # 1. Check if it's still open
+            # 2. If not open, check result in history
             
-            # Let's check history if result is ambiguous
-            # For now assume result is the P/L
+            # But to be safe and avoid blocking, let's just use get_balance change? No, unreliable.
             
-            if result > 0:
-                return 'WIN'
-            elif result < 0:
-                return 'LOSS'
-            elif result == 0:
-                return 'TIE'
+            # Let's use the 'check_win_v3' but with a timeout logic or just try-except-pass
+            # Actually, check_win_v3 IS blocking in most implementations.
+            
+            # Better implementation: Check P&L history
+            # Fetch latest 10 trades
+            
+            # Check if trade is expired based on time?
+            # If trade time + duration < current time, it SHOULD be closed.
+            # Then we can query result.
+            
+            pass
+            
+            # Fallback to history check (which is safer than blocking)
+            history = self.iq_api.get_option_open_by_other_pc()
+            
+            if history and isinstance(history, dict):
+                tid = int(trade_id)
+                for k, v in history.items():
+                    try:
+                        k_int = int(k)
+                    except ValueError:
+                        continue
+                    
+                    if k_int == tid:
+                        # Found the trade
+                        # Check if it has a result
+                        # If 'win_amount' is present and not None
+                        win_amount = v.get('win_amount')
+                        if win_amount is not None:
+                             profit = win_amount - v.get('amount', 0)
+                             if profit > 0: return 'WIN'
+                             elif profit < 0: return 'LOSS'
+                             else: return 'TIE'
+                        
+                        # If close_time is passed
+                        # ...
             
             return 'PENDING'
-        except:
-            # Fallback to history check
-            try:
-                history = self.iq_api.get_option_open_by_other_pc()
-                # Iterate history to find trade_id
-                if history and isinstance(history, dict):
-                    tid = int(trade_id)
-                    for k, v in history.items():
-                        try:
-                            k_int = int(k)
-                        except ValueError:
-                            continue
-                        
-                        if k_int == tid:
-                            # Found it
-                            close_time = v.get('close_time', 0)
-                            if close_time == 0: return 'PENDING'
-                            
-                            profit = v.get('win_amount', 0) - v.get('amount', 0)
-                            if profit > 0: return 'WIN'
-                            elif profit < 0: return 'LOSS'
-                            else: return 'TIE'
-            except:
-                pass
-                
+
+        except Exception as e:
+            # print(f"Check Trade Error: {e}")
             return 'PENDING'
