@@ -338,6 +338,7 @@ def bot_loop():
                                             
                                             if success:
                                                 bot_state.last_trade_time = time.time()
+                                                time.sleep(2)  # post-trade pause to avoid immediate ws churn
                                                 break
                                             
                                             bot_state.add_log(f"Execution Retry {attempt+1}/{max_retries} Failed: {msg}")

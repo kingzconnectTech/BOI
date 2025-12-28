@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import yfinance as yf
 from iqoptionapi.stable_api import IQ_Option
 import os
+import threading
 
 class DataFeed:
     def __init__(self, session_id=None):
@@ -19,6 +20,7 @@ class DataFeed:
         self.password = None
         self.account_type = "PRACTICE"
         self.last_balance = 0.0
+        self.conn_lock = threading.Lock()
 
     def disconnect(self):
         print("Disconnect called.") # Debug log
@@ -30,6 +32,40 @@ class DataFeed:
                 pass
             self.iq_api = None
         return True, "Disconnected"
+
+    def ensure_connection(self, mode="soft"):
+        """
+        Centralized reconnection with locking to avoid race conditions.
+        mode: "soft" tries reconnect; "hard" closes and full reconnect.
+        """
+        if not self.email or not self.password:
+            return False
+        with self.conn_lock:
+            try:
+                if mode == "hard":
+                    try:
+                        if self.iq_api:
+                            self.iq_api.close()
+                        self.iq_api = None
+                    except:
+                        pass
+                    time.sleep(1)
+                if self.iq_api is None:
+                    self.iq_api = IQ_Option(self.email, self.password)
+                check, reason = self.iq_api.connect()
+                if check:
+                    self.is_connected = True
+                    try:
+                        self.iq_api.change_balance(self.account_type.upper())
+                    except:
+                        pass
+                    return True
+                else:
+                    print(f"Reconnect failed: {reason}")
+                    return False
+            except Exception as e:
+                print(f"Reconnect Exception: {e}")
+                return False
 
     def connect_iq(self, email, password, account_type="PRACTICE"):
         """
@@ -117,32 +153,15 @@ class DataFeed:
             try:
                 print("Connection issue detected in get_balance. Reconnecting...")
                 # Always try to connect if we hit an error, regardless of check_connect()
-                # self.iq_api.close() # Optional: Close strictly
-                
-                check, reason = self.iq_api.connect()
-                if check:
-                    print("Reconnected in get_balance.")
-                    self.is_connected = True
-                    # Refresh balance
+                if self.ensure_connection(mode="soft"):
                     bal = self.iq_api.get_balance()
                     self.last_balance = bal
                     return bal
                 else:
-                    # Full re-init logic if simple reconnect fails
-                    if hasattr(self, 'email') and hasattr(self, 'password'):
-                         print("Attempting full re-init in get_balance...")
-                         try: self.iq_api.close() 
-                         except: pass
-                         
-                         self.iq_api = IQ_Option(self.email, self.password)
-                         check, _ = self.iq_api.connect()
-                         if check:
-                             self.is_connected = True
-                             if hasattr(self, 'account_type'):
-                                 self.iq_api.change_balance(self.account_type.upper())
-                             bal = self.iq_api.get_balance()
-                             self.last_balance = bal
-                             return bal
+                    if self.ensure_connection(mode="hard"):
+                        bal = self.iq_api.get_balance()
+                        self.last_balance = bal
+                        return bal
             except Exception as re_err:
                 print(f"Reconnection in get_balance failed: {re_err}")
             
@@ -196,28 +215,11 @@ class DataFeed:
                     if "reconnect" in err_str or "closed" in err_str or "ssl" in err_str:
                         print("Critical Connection Error Detected. Forcing Reset.")
                         self.is_connected = False
-                        
-                        # Aggressive Reset
-                        try: self.iq_api.close() 
-                        except: pass
-                        
-                        self.iq_api = None
-                        time.sleep(2) # Give it a moment
-                        
-                        try:
-                            # Re-instantiate
-                            if hasattr(self, 'email') and hasattr(self, 'password'):
-                                self.iq_api = IQ_Option(self.email, self.password)
-                                check, reason = self.iq_api.connect()
-                                if check:
-                                    print("Re-init success after critical error.")
-                                    self.is_connected = True
-                                    self.iq_api.change_balance(self.account_type.upper())
-                                    continue # Try fetching again immediately
-                                else:
-                                    print(f"Re-init failed: {reason}")
-                        except Exception as crit_err:
-                            print(f"Critical Reset Failed: {crit_err}")
+                        if self.ensure_connection(mode="hard"):
+                            print("Re-init success after critical error.")
+                            continue
+                        else:
+                            print("Re-init failed after critical error.")
                     
                     if attempt < max_retries - 1:
                         time.sleep(2) # Increased sleep
@@ -252,33 +254,19 @@ class DataFeed:
                                 except: pass # close() might clear data?
                                 
                                 # Just call connect() - it handles reconnection
-                                check, reason = self.iq_api.connect()
-                                
-                                if check:
+                                if self.ensure_connection(mode="soft"):
                                     print("Reconnection success.")
-                                    self.is_connected = True
-                                    if hasattr(self, 'account_type'):
-                                        self.iq_api.change_balance(self.account_type.upper())
+                                    reconnect_success = True
                                 else:
-                                    print(f"Reconnection failed: {reason}")
+                                    print(f"Reconnection failed.")
                                     
                                     # Only if simple reconnect fails, try full re-init (Nuclear option)
                                     # But ONLY if we don't have active trades? 
                                     # Actually, if connection is dead, we have to re-init.
                                     if attempt > 1: # Only on last attempt
                                         print("Reconnection failed. Attempting full re-initialization...")
-                                        try:
-                                            self.iq_api.close()
-                                            if os.path.exists("session.json"):
-                                                try: os.remove("session.json")
-                                                except: pass
-                                        except: pass
-                                        
-                                        self.iq_api = IQ_Option(self.email, self.password)
-                                        check, reason = self.iq_api.connect()
-                                        if check:
-                                            self.is_connected = True
-                                            self.iq_api.change_balance(self.account_type.upper())
+                                        if self.ensure_connection(mode="hard"):
+                                            reconnect_success = True
                             except Exception as reinit_err:
                                 print(f"Reconnection exception: {reinit_err}")
                         continue
@@ -379,6 +367,7 @@ class DataFeed:
             check, id = self.iq_api.buy(amount, iq_symbol, direction, duration)
             
             if check:
+                time.sleep(2)  # small pause to let ws stabilize post-trade
                 return True, {'id': id, 'type': 'BINARY'}, "Trade Placed"
             else:
                 return False, None, "Trade Failed (API returned False)"
