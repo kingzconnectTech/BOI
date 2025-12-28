@@ -205,6 +205,8 @@ class DataFeed:
                         # Check if iq_api exists and has check_connect method (standard in iqoptionapi)
                         if self.iq_api:
                             reconnect_success = False
+                            # Mark as disconnected during attempt
+                            self.is_connected = False 
                             try:
                                 # First, try to ensure we are connected
                                 if not self.iq_api.check_connect():
@@ -213,6 +215,7 @@ class DataFeed:
                                     if check:
                                         print("Simple reconnection successful.")
                                         reconnect_success = True
+                                        self.is_connected = True
                             except Exception as conn_err:
                                 print(f"Reconnection attempt failed: {conn_err}")
                             
@@ -234,6 +237,7 @@ class DataFeed:
                                         check, reason = self.iq_api.connect()
                                         if check:
                                             print("Full re-initialization success.")
+                                            self.is_connected = True
                                             if hasattr(self, 'account_type'):
                                                 self.iq_api.change_balance(self.account_type.upper())
                                         else:
