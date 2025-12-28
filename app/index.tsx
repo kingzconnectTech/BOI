@@ -580,7 +580,7 @@ export default function App() {
   useEffect(() => {
     if (!sessionToken) return; // Don't poll if not logged in
     
-    const interval = setInterval(fetchData, 2000); // Poll every 2 seconds
+    const interval = setInterval(fetchData, 3000); // Poll every 3 seconds
     return () => clearInterval(interval);
   }, [serverIp, selectedChartPair, showSettings, sessionToken]); // Restart poll if key deps change
 
