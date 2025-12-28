@@ -99,7 +99,13 @@ async function registerForPushNotificationsAsync() {
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
         token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     } catch (e) {
-        token = (await Notifications.getExpoPushTokenAsync()).data;
+        console.log("Push Token Error:", e);
+        try {
+            token = (await Notifications.getExpoPushTokenAsync()).data;
+        } catch (e2) {
+            console.log("Push Token Fallback Failed (Expo Go limitation?):", e2);
+            token = undefined;
+        }
     }
   }
 
