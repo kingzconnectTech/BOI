@@ -169,6 +169,16 @@ export default function App() {
   const [expoPushToken, setExpoPushToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [scanningDots, setScanningDots] = useState('');
+
+  // Scanning Animation
+  useEffect(() => {
+    if (!botRunning) return;
+    const interval = setInterval(() => {
+        setScanningDots(prev => prev.length >= 3 ? '' : prev + '.');
+    }, 500);
+    return () => clearInterval(interval);
+  }, [botRunning]);
 
   // --- Auth State ---
   const [authUsername, setAuthUsername] = useState('');
@@ -1016,6 +1026,15 @@ export default function App() {
                 {botRunning ? 'STOP AUTO-BOT' : 'START AUTO-BOT'}
             </Text>
           </TouchableOpacity>
+          
+          {botRunning && (
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 15, backgroundColor: 'rgba(34, 197, 94, 0.1)', padding: 10, borderRadius: 20}}>
+                  <ActivityIndicator size="small" color="#00ff83" style={{marginRight: 10}} />
+                  <Text style={{color: '#00ff83', fontWeight: 'bold'}}>
+                      Scanning market for signals{scanningDots}
+                  </Text>
+              </View>
+          )}
         </View>
 
         {/* Logs */}

@@ -179,7 +179,21 @@ class DataFeed:
                     candles = self.iq_api.get_candles(iq_symbol, size, 1000, endtime)
                     if candles:
                         break
-                    time.sleep(1) # Small pause if empty
+                    
+                    # If candles is empty, it MIGHT be a connection issue that wasn't raised as an exception.
+                    # Let's proactively check connection status here.
+                    is_connected = True
+                    try:
+                        if self.iq_api and not self.iq_api.check_connect():
+                            is_connected = False
+                    except:
+                        is_connected = False
+                    
+                    if not is_connected:
+                         # Raise exception to trigger the catch block below which handles reconnection
+                         raise Exception("Connection lost (detected via empty candles + check_connect)")
+
+                    time.sleep(1) # Small pause if empty but connected
                 except Exception as e:
                     if attempt < max_retries - 1:
                         time.sleep(2)
