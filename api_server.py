@@ -458,6 +458,24 @@ def disconnect_iq(bot_state: BotState = Depends(get_current_bot)):
 @app.get("/signals")
 def get_signals(bot_state: BotState = Depends(get_current_bot)):
     return bot_state.signals
+ 
+@app.post("/signals/clear")
+def clear_signals(all: bool = Query(False), bot_state: BotState = Depends(get_current_bot)):
+    """
+    Removes recent trades from the signals list.
+    - If all=False (default): removes non-PENDING signals (EXECUTED/FAILED/SKIPPED/EXPIRED).
+    - If all=True: clears the entire signals list.
+    """
+    before = len(bot_state.signals)
+    if all:
+        bot_state.signals = []
+        removed = before
+        bot_state.add_log(f"Cleared all signals ({removed})")
+    else:
+        bot_state.signals = [s for s in bot_state.signals if s.get('status') == 'PENDING']
+        removed = before - len(bot_state.signals)
+        bot_state.add_log(f"Removed recent trades ({removed})")
+    return {"removed": removed, "remaining": len(bot_state.signals)}
 
 @app.get("/rates")
 def get_exchange_rates():
