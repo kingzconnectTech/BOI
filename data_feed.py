@@ -18,6 +18,7 @@ class DataFeed:
         self.email = None
         self.password = None
         self.account_type = "PRACTICE"
+        self.last_balance = 0.0
 
     def disconnect(self):
         print("Disconnect called.") # Debug log
@@ -99,39 +100,55 @@ class DataFeed:
         """
         Safely gets the balance, handling reconnection if needed.
         """
-        if not self.use_iq or not self.is_connected:
+        if not self.use_iq:
             return 0.0
+            
+        # If not connected but we have a last balance, return it to prevent UI flicker
+        if not self.is_connected:
+            return self.last_balance
 
         try:
-            return self.iq_api.get_balance()
+            bal = self.iq_api.get_balance()
+            self.last_balance = bal
+            return bal
         except Exception as e:
             print(f"Get Balance Error: {e}")
-            # Try to reconnect
+            # Force Reconnect Logic
             try:
-                if self.iq_api and not self.iq_api.check_connect():
-                    print("Connection lost during get_balance. Reconnecting...")
-                    check, reason = self.iq_api.connect()
-                    if check:
-                        print("Reconnected.")
-                        self.is_connected = True
-                        return self.iq_api.get_balance()
-                    else:
-                        # Full re-init logic
-                        if hasattr(self, 'email') and hasattr(self, 'password'):
-                             print("Attempting full re-init in get_balance...")
-                             self.iq_api = IQ_Option(self.email, self.password)
-                             check, _ = self.iq_api.connect()
-                             if check:
-                                 self.is_connected = True
-                                 if hasattr(self, 'account_type'):
-                                     self.iq_api.change_balance(self.account_type.upper())
-                                 return self.iq_api.get_balance()
+                print("Connection issue detected in get_balance. Reconnecting...")
+                # Always try to connect if we hit an error, regardless of check_connect()
+                # self.iq_api.close() # Optional: Close strictly
+                
+                check, reason = self.iq_api.connect()
+                if check:
+                    print("Reconnected in get_balance.")
+                    self.is_connected = True
+                    # Refresh balance
+                    bal = self.iq_api.get_balance()
+                    self.last_balance = bal
+                    return bal
+                else:
+                    # Full re-init logic if simple reconnect fails
+                    if hasattr(self, 'email') and hasattr(self, 'password'):
+                         print("Attempting full re-init in get_balance...")
+                         try: self.iq_api.close() 
+                         except: pass
+                         
+                         self.iq_api = IQ_Option(self.email, self.password)
+                         check, _ = self.iq_api.connect()
+                         if check:
+                             self.is_connected = True
+                             if hasattr(self, 'account_type'):
+                                 self.iq_api.change_balance(self.account_type.upper())
+                             bal = self.iq_api.get_balance()
+                             self.last_balance = bal
+                             return bal
             except Exception as re_err:
                 print(f"Reconnection in get_balance failed: {re_err}")
             
-            # If all fails
-            self.is_connected = False
-            return 0.0
+            # If all fails, return last known balance instead of 0.0
+            # This prevents "Account Removed"
+            return self.last_balance
 
     def fetch_data(self, symbol=None, period="5d", interval="1m"):
         """
@@ -203,7 +220,8 @@ class DataFeed:
                             try:
                                 print("Attempting reconnection...")
                                 # Try to close and reconnect
-                                # self.iq_api.close() # close() might clear data?
+                                try: self.iq_api.close() 
+                                except: pass # close() might clear data?
                                 
                                 # Just call connect() - it handles reconnection
                                 check, reason = self.iq_api.connect()
