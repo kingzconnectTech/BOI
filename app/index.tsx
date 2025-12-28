@@ -552,7 +552,7 @@ export default function App() {
     setRefreshing(true);
     await fetchData();
     setRefreshing(false);
-  }, [serverIp, selectedChartPair, showSettings, sessionToken]);
+  }, [fetchData]);
 
   // --- Polling Loop ---
   useEffect(() => {
@@ -1051,6 +1051,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingBottom: 100,
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
