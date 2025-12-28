@@ -69,7 +69,8 @@ Notifications.setNotificationHandler({
 
 const AVAILABLE_PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", 
-    "EURGBP-OTC"
+    "EURGBP-OTC", "USDCHF-OTC",
+    "AUDUSD-OTC", "EURAUD-OTC"
 ];
 
 async function registerForPushNotificationsAsync() {

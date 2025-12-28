@@ -197,8 +197,6 @@ def bot_loop():
                         df = bot_state.data_feed.fetch_data(symbol=ticker, period="1d", interval=config.ENTRY_TIMEFRAME)
                         
                         if df is None or df.empty:
-                            if ticker == "USDJPY-OTC":
-                                print(f"DEBUG: No data for {ticker}")
                             continue
 
                         # Calculate Indicators
@@ -379,7 +377,7 @@ class ConfigRequest(BaseModel):
     expiry_minutes: int = 2
     stop_loss: int = 2
     profit_goal: float = 5.0
-    active_pairs: list = ["EURUSD-OTC", "GBPUSD-OTC"]
+    active_pairs: list = ["EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC", "USDCHF-OTC", "AUDUSD-OTC", "EURAUD-OTC"]
 
 class PushToken(BaseModel):
     token: str
