@@ -179,8 +179,17 @@ class DataFeed:
                     if attempt < max_retries - 1:
                         time.sleep(2)
                         # Reconnect if we suspect connection dropped
-                        if "10060" in str(e) or "socket" in str(e).lower():
-                            self.iq_api.connect()
+                        # Check if iq_api exists and has check_connect method (standard in iqoptionapi)
+                        if self.iq_api:
+                            try:
+                                if not self.iq_api.check_connect():
+                                    self.iq_api.connect()
+                            except AttributeError:
+                                # Fallback if check_connect doesn't exist or other error
+                                try:
+                                    self.iq_api.connect()
+                                except:
+                                    pass
                         continue
                     print(f"IQ Option Data Error (Retried): {e}")
                     return None
