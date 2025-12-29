@@ -67,6 +67,9 @@ class LoginRequest(BaseModel):
 class StopRequest(BaseModel):
     email: str
 
+class DisconnectRequest(BaseModel):
+    email: str
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Backend is running"}
