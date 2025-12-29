@@ -46,6 +46,11 @@ async def startup_event():
     # Start the keep-alive thread
     threading.Thread(target=keep_alive, daemon=True).start()
 
+class ConnectRequest(BaseModel):
+    email: str
+    password: str
+    mode: str = "PRACTICE"
+
 class LoginRequest(BaseModel):
     email: str
     password: str
