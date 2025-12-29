@@ -87,7 +87,8 @@ export default function App() {
         amount: parseFloat(amount),
         duration: parseInt(duration),
         stop_loss: parseFloat(stopLoss),
-        take_profit: parseFloat(takeProfit)
+        take_profit: parseFloat(takeProfit),
+        max_consecutive_losses: parseInt(maxConsecutiveLosses)
       });
       
       if (response.data.status === 'started') {
