@@ -96,13 +96,14 @@ class IQBot:
         
         if check:
             self.connected = True
-            self.is_running = True
+            # self.is_running = True # Wait for start command
             
             # Change account mode
             self.api.change_balance(mode)
             
             self.update_balance()
             self.reset_stats()
+            self.add_log(f"Connected successfully ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
             self.connected = False

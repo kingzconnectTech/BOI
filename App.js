@@ -151,8 +151,25 @@ export default function App() {
       return;
     }
     
-    // We start the bot immediately upon login to verify credentials
-    await startBot();
+    try {
+        const response = await axios.post(`${API_URL}/connect`, {
+            email,
+            password,
+            mode
+        });
+        
+        if (response.data.status === 'connected') {
+            setPage('dashboard');
+            setIsRunning(false);
+            addLog(`Success: ${response.data.message}`);
+            if (response.data.data && response.data.data.stats) {
+                 setStats(response.data.data.stats);
+            }
+        }
+    } catch (error) {
+        const errorMsg = error.response?.data?.detail || error.message;
+        alert(`Connection Failed: ${errorMsg}`);
+    }
   };
 
   const startBot = async () => {

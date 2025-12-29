@@ -66,6 +66,15 @@ class StopRequest(BaseModel):
 def read_root():
     return {"status": "ok", "message": "Backend is running"}
 
+@app.post("/connect")
+def connect_bot(data: ConnectRequest):
+    bot = bot_manager.get_bot(data.email)
+    success, message = bot.connect(data.email, data.password, data.mode)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"status": "connected", "message": message, "data": bot.get_status()}
+
 @app.post("/start")
 def start_bot(login_data: LoginRequest):
     bot = bot_manager.get_bot(login_data.email)

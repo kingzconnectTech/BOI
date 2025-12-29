@@ -9,9 +9,15 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@expo/metro-config": "~54.0.12",
     "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "assert": "^2.1.0",
     "axios": "^1.13.2",
     "expo": "~54.0.30",
+    "expo-constants": "~18.0.12",
+    "expo-device": "~8.0.10",
+    "expo-notifications": "~0.32.15",
     "expo-status-bar": "~3.0.9",
     "firebase": "^12.7.0",
     "react": "19.1.0",
