@@ -134,8 +134,8 @@ class IQBot:
                 # So we keep the list safe:
                 pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC", "EURJPY-OTC"]
                 
-                # Shuffle pairs to ensure we don't always pick the first one (since random strategy always fires)
-                random.shuffle(pairs_to_scan)
+                # Scan pairs sequentially to ensure deterministic behavior
+                # random.shuffle(pairs_to_scan) - Removed as per request
                 
                 for pair in pairs_to_scan:
                     if not self.is_running: break
