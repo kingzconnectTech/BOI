@@ -21,6 +21,7 @@ class IQBot:
         self.trade_duration = 1 # minutes
         self.stop_loss = 0
         self.take_profit = 0
+        self.max_consecutive_losses = 0
         
         # Session Stats
         self.initial_balance = 0
@@ -29,12 +30,14 @@ class IQBot:
         self.losses = 0
         self.trades_taken = 0
         self.trade_in_progress = False
+        self.current_consecutive_losses = 0
 
-    def set_config(self, amount, duration, stop_loss, take_profit):
+    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses):
         self.trade_amount = amount
         self.trade_duration = duration
         self.stop_loss = stop_loss
         self.take_profit = take_profit
+        self.max_consecutive_losses = max_consecutive_losses
 
     def reset_stats(self):
         self.total_profit = 0
@@ -173,9 +176,11 @@ class IQBot:
                 profit = float(result)
                 if profit > 0:
                     self.wins += 1
+                    self.current_consecutive_losses = 0
                     self.add_log(f"WIN: +${profit:.2f}")
                 elif profit < 0:
                     self.losses += 1
+                    self.current_consecutive_losses += 1
                     self.add_log(f"LOSS: ${profit:.2f}")
                 else:
                     self.add_log(f"TIE: $0.00")

@@ -34,7 +34,13 @@ def start_bot(login_data: LoginRequest):
     bot_instance.clear_logs() # Clear previous logs
     
     # Set config
-    bot_instance.set_config(login_data.amount, login_data.duration, login_data.stop_loss, login_data.take_profit)
+    bot_instance.set_config(
+        login_data.amount, 
+        login_data.duration, 
+        login_data.stop_loss, 
+        login_data.take_profit,
+        login_data.max_consecutive_losses
+    )
     
     success, message = bot_instance.connect(login_data.email, login_data.password, login_data.mode)
     if not success:

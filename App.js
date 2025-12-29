@@ -242,6 +242,18 @@ export default function App() {
           </View>
         </View>
 
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Max Consecutive Losses (0 to disable)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="2"
+            placeholderTextColor="#666"
+            value={maxConsecutiveLosses}
+            onChangeText={setMaxConsecutiveLosses}
+            keyboardType="numeric"
+          />
+        </View>
+
         <TouchableOpacity 
           style={[styles.button, isRunning ? styles.stopButton : styles.startButton]}
           onPress={isRunning ? handleStop : handleStart}
