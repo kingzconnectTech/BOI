@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+iqoptionapi
+python-dotenv
+pandas
+numpy
+requests
