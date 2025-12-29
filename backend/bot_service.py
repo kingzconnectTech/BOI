@@ -5,6 +5,10 @@ import random
 
 import traceback
 
+import talib
+import numpy as np
+from datetime import datetime, timedelta
+
 class IQBot:
     def __init__(self):
         self.api = None
@@ -22,6 +26,7 @@ class IQBot:
         self.stop_loss = 0
         self.take_profit = 0
         self.max_consecutive_losses = 0
+        self.max_trades = 0 # 0 means unlimited
         self.auto_trading = True
         
         self.initial_balance = 0
@@ -32,12 +37,13 @@ class IQBot:
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
 
-    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, auto_trading=True):
+    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
         self.trade_amount = amount
         self.trade_duration = duration
         self.stop_loss = stop_loss
         self.take_profit = take_profit
         self.max_consecutive_losses = max_consecutive_losses
+        self.max_trades = max_trades
         self.auto_trading = auto_trading
     def reset_stats(self):
         self.total_profit = 0
@@ -107,7 +113,7 @@ class IQBot:
                 # Remove restricted pairs if any were accidentally added or just filter strictly
                 # User requested: "usdjyo-otc, nzdusd-otc do not trade them"
                 # So we keep the list safe:
-                pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC"]
+                pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC", "EURJPY-OTC"]
                 
                 # Shuffle pairs to ensure we don't always pick the first one (since random strategy always fires)
                 random.shuffle(pairs_to_scan)
@@ -133,28 +139,198 @@ class IQBot:
                 time.sleep(5)
 
     def _process_pair(self, pair):
-        # 3. Random Strategy
-        # Randomly choose CALL or PUT
-        direction = random.choice(["call", "put"])
+        # Time Check (WAT: UTC+1)
+        utc_now = datetime.utcnow()
+        wat_now = utc_now + timedelta(hours=1)
+        
+        # Ranges: 9:00-11:30, 14:00-16:30, 19:00-21:00
+        current_time = wat_now.time()
+        
+        can_trade = False
+        ranges = [
+            ("09:00", "11:30"),
+            ("14:00", "16:30"),
+            ("19:00", "21:00")
+        ]
+        
+        for start, end in ranges:
+            s = datetime.strptime(start, "%H:%M").time()
+            e = datetime.strptime(end, "%H:%M").time()
+            if s <= current_time <= e:
+                can_trade = True
+                break
+        
+        if not can_trade:
+            # self.add_log(f"Outside trading hours (WAT). Current: {current_time.strftime('%H:%M')}")
+            return False # Just skip quietly or log once (too noisy if logged every loop)
             
-        if direction:
-            # 4. Check Auto Trading
+        # Analyze Strategy
+        action = self.analyze_strategy(pair)
+        
+        if action:
+            direction = action
+            
+            # Expiry Rule: Use User Defined Duration
+            expiry_duration = self.trade_duration 
+            
+            # Check Auto Trading
             if not self.auto_trading:
                 self.add_log(f"SIGNAL: {pair} {direction.upper()} (Simulation)")
-                return True # Indicate we 'processed' it so loop breaks
+                return True 
 
-            # 5. Place Trade
-            check, id = self.api.buy(self.trade_amount, pair, direction, self.trade_duration)
+            # Place Trade
+            check, id = self.api.buy(self.trade_amount, pair, direction, expiry_duration)
             if check:
                 self.trade_in_progress = True
-                self.add_log(f"Trade placed: {pair} {direction} ${self.trade_amount} ({self.trade_duration}m)")
-                
-                # Check result in a separate thread to not block scanning
+                self.add_log(f"Trade placed: {pair} {direction} ${self.trade_amount} ({expiry_duration}m)")
                 threading.Thread(target=self._check_trade_result, args=(id,)).start()
-                
                 self.update_balance()
+                return True
             else:
                 self.add_log(f"Trade failed: {pair} {direction}")
+                return False
+                
+        return False
+
+    def analyze_strategy(self, pair):
+        try:
+            # 1. Fetch Candles (1 min timeframe = 60s)
+            # Need enough for EMA 50 -> fetch 100 candles
+            candles = self.api.get_candles(pair, 60, 100, time.time())
+            
+            if not candles or len(candles) < 60:
+                return None
+                
+            # Convert to numpy arrays
+            # candles is a list of dicts: [{'open': 1.1, 'close': 1.2, ...}, ...]
+            close_prices = np.array([c['close'] for c in candles], dtype=float)
+            open_prices = np.array([c['open'] for c in candles], dtype=float)
+            high_prices = np.array([c['max'] for c in candles], dtype=float)
+            low_prices = np.array([c['min'] for c in candles], dtype=float)
+            
+            # 2. Indicators
+            ema20 = talib.EMA(close_prices, timeperiod=20)
+            ema50 = talib.EMA(close_prices, timeperiod=50)
+            upper_bb, middle_bb, lower_bb = talib.BBANDS(close_prices, timeperiod=20, nbdevup=2.0, nbdevdn=2.0, matype=0)
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            
+            # Indices: -1 is current (forming), -2 is last closed
+            last_idx = -2
+            prev_idx = -3 # For checking previous candle context if needed
+            
+            c_close = close_prices[last_idx]
+            c_open = open_prices[last_idx]
+            c_high = high_prices[last_idx]
+            c_low = low_prices[last_idx]
+            
+            c_rsi = rsi[last_idx]
+            c_ema20 = ema20[last_idx]
+            c_ema50 = ema50[last_idx]
+            
+            # Step 1: Trend Filter
+            is_uptrend = c_ema20 > c_ema50 and c_rsi > 50
+            is_downtrend = c_ema20 < c_ema50 and c_rsi < 50
+            
+            # Avoid flat/crossing EMAs (simple check: distance)
+            # if abs(c_ema20 - c_ema50) < threshold: return None
+            
+            if not is_uptrend and not is_downtrend:
+                return None
+                
+            # RSI Filter (45-55 NO TRADE)
+            if 45 <= c_rsi <= 55:
+                return None
+                
+            # Step 2 & 3: Pullback + Confirmation
+            
+            # CALL SCENARIO
+            if is_uptrend:
+                # Rule: Pullback to EMA 20 OR Lower/Middle BB
+                # Check if Low of last closed candle touched EMA20 or Lower BB
+                # Or if previous candle touched it.
+                
+                # Simplified Pullback Logic:
+                # We want to enter ON confirmation.
+                # So the Confirmation Candle (last closed) should be GREEN (Bullish).
+                is_bullish = c_close > c_open
+                if not is_bullish: return None
+                
+                # Check for Pullback context:
+                # Did this candle or the previous one touch the zone?
+                # Zone: EMA20, LowerBB, MiddleBB
+                # We check if Low <= EMA20 (or close to it)
+                
+                # Let's check if the Low of the confirmation candle OR the previous candle dipped near EMA20
+                touched_zone = False
+                
+                # Check current candle (Confirmation) Low
+                if c_low <= c_ema20 * 1.0002 or c_low <= middle_bb[last_idx] * 1.0002: # Small buffer
+                     touched_zone = True
+                
+                # Check previous candle Low
+                if not touched_zone:
+                    p_low = low_prices[prev_idx]
+                    if p_low <= ema20[prev_idx] * 1.0002 or p_low <= middle_bb[prev_idx] * 1.0002:
+                        touched_zone = True
+                        
+                if not touched_zone:
+                    return None
+                    
+                # Confirmation types:
+                # 1. Bullish Engulfing
+                is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
+                # 2. Strong Bullish (Body size)
+                body_size = abs(c_close - c_open)
+                avg_body = np.mean(np.abs(close_prices[-7:-2] - open_prices[-7:-2]))
+                is_strong = body_size > avg_body
+                # 3. Rejection (Long lower wick)
+                lower_wick = c_open - c_low if is_bullish else c_close - c_low
+                is_rejection = lower_wick > body_size * 0.5 # Wick is significant
+                
+                if is_engulfing or is_strong or is_rejection:
+                    return "call"
+
+            # PUT SCENARIO
+            elif is_downtrend:
+                # Rule: Pullback to EMA 20 OR Upper/Middle BB
+                
+                # Confirmation Candle must be RED (Bearish)
+                is_bearish = c_close < c_open
+                if not is_bearish: return None
+                
+                touched_zone = False
+                
+                # Check current candle High (touched from below?)
+                if c_high >= c_ema20 * 0.9998 or c_high >= middle_bb[last_idx] * 0.9998:
+                    touched_zone = True
+                    
+                if not touched_zone:
+                    p_high = high_prices[prev_idx]
+                    if p_high >= ema20[prev_idx] * 0.9998 or p_high >= middle_bb[prev_idx] * 0.9998:
+                        touched_zone = True
+                        
+                if not touched_zone:
+                    return None
+                    
+                # Confirmation types:
+                # 1. Bearish Engulfing
+                is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
+                # 2. Strong Bearish
+                body_size = abs(c_open - c_close)
+                avg_body = np.mean(np.abs(close_prices[-7:-2] - open_prices[-7:-2]))
+                is_strong = body_size > avg_body
+                # 3. Rejection (Long upper wick)
+                upper_wick = c_high - c_open if is_bearish else c_high - c_close
+                is_rejection = upper_wick > body_size * 0.5
+                
+                if is_engulfing or is_strong or is_rejection:
+                    return "put"
+                    
+            return None
+            
+        except Exception as e:
+            print(f"Error in analysis: {e}")
+            return None
 
     def _check_trade_result(self, order_id):
         try:
@@ -203,6 +379,9 @@ class IQBot:
                      self.stop()
                 elif self.max_consecutive_losses > 0 and self.current_consecutive_losses >= self.max_consecutive_losses:
                      self.add_log(f"Max consecutive losses reached ({self.current_consecutive_losses}). Stopping bot.")
+                     self.stop()
+                elif self.max_trades > 0 and self.trades_taken >= self.max_trades:
+                     self.add_log(f"Max trades limit reached ({self.trades_taken}). Stopping bot.")
                      self.stop()
 
             else:

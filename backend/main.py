@@ -25,6 +25,7 @@ class LoginRequest(BaseModel):
     stop_loss: float = 0.0
     take_profit: float = 0.0
     max_consecutive_losses: int = 0
+    max_trades: int = 0
     auto_trading: bool = True
 
 @app.get("/")
@@ -42,6 +43,7 @@ def start_bot(login_data: LoginRequest):
         login_data.stop_loss, 
         login_data.take_profit,
         login_data.max_consecutive_losses,
+        login_data.max_trades,
         login_data.auto_trading
     )
     

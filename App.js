@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch, SafeAreaView, Dimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import axios from 'axios';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-// Backend URL - Use local IP for device testing, localhost for web/simulator
-// For Android Emulator use 'http://10.0.2.2:8001'
-// For iOS Simulator / Web use 'http://localhost:8001'
+// Backend URL
 const API_URL = 'http://192.168.43.76:8001'; 
-// NOTE: If you are running on a real device, change 'localhost' to your computer's IP address (e.g., http://192.168.1.5:8001)
- 
+const { width } = Dimensions.get('window');
 
 export default function App() {
   const [email, setEmail] = useState('');
@@ -19,6 +17,7 @@ export default function App() {
   const [stopLoss, setStopLoss] = useState('10');
   const [takeProfit, setTakeProfit] = useState('20');
   const [maxConsecutiveLosses, setMaxConsecutiveLosses] = useState('2');
+  const [maxTrades, setMaxTrades] = useState('0'); // 0 = unlimited
   const [autoTrading, setAutoTrading] = useState(true);
   const [stats, setStats] = useState({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
   const [backendStatus, setBackendStatus] = useState('Checking...');
@@ -91,6 +90,7 @@ export default function App() {
         stop_loss: parseFloat(stopLoss) || 0,
         take_profit: parseFloat(takeProfit) || 0,
         max_consecutive_losses: parseInt(maxConsecutiveLosses) || 0,
+        max_trades: parseInt(maxTrades) || 0,
         auto_trading: autoTrading
       });
       
@@ -119,369 +119,512 @@ export default function App() {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" backgroundColor="#0f172a" />
       
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>IQ Option Bot</Text>
-        <View style={styles.statusContainer}>
-          <View style={[styles.statusDot, { backgroundColor: backendStatus === 'Connected' ? '#4ade80' : '#ef4444' }]} />
-          <Text style={styles.statusText}>{backendStatus}</Text>
+        <View>
+          <Text style={styles.headerTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
+          <Text style={styles.headerSubtitle}>IQ Option Automated Trader</Text>
+        </View>
+        <View style={styles.statusBadge}>
+          <View style={[styles.statusDot, { backgroundColor: backendStatus === 'Connected' ? '#10b981' : '#ef4444' }]} />
+          <Text style={styles.statusText}>{backendStatus === 'Connected' ? 'ONLINE' : 'OFFLINE'}</Text>
         </View>
       </View>
 
-      <ScrollView style={styles.mainScrollView}>
-        {/* Stats Board */}
-        {isRunning && (
-          <View style={styles.statsContainer}>
-          <View style={styles.statBox}>
-             <Text style={styles.statLabel}>Profit</Text>
-             <Text style={[styles.statValue, { color: stats.profit >= 0 ? '#4ade80' : '#ef4444' }]}>
-               ${stats.profit}
-             </Text>
+      <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.scrollContent}>
+        
+        {/* Stats Dashboard */}
+        <View style={styles.dashboardContainer}>
+          <View style={styles.statCard}>
+            <MaterialCommunityIcons name="finance" size={24} color="#10b981" />
+            <Text style={styles.statLabel}>Profit</Text>
+            <Text style={[styles.statValue, { color: stats.profit >= 0 ? '#10b981' : '#ef4444' }]}>
+              ${stats.profit}
+            </Text>
           </View>
-          <View style={styles.statBox}>
-             <Text style={styles.statLabel}>Win Rate</Text>
-             <Text style={styles.statValue}>{stats.win_rate}%</Text>
+          <View style={styles.statCard}>
+            <MaterialCommunityIcons name="target" size={24} color="#3b82f6" />
+            <Text style={styles.statLabel}>Win Rate</Text>
+            <Text style={styles.statValue}>{stats.win_rate}%</Text>
           </View>
-          <View style={styles.statBox}>
-             <Text style={styles.statLabel}>W/L</Text>
-             <Text style={styles.statValue}>{stats.wins}/{stats.losses}</Text>
+          <View style={styles.statCard}>
+            <MaterialCommunityIcons name="history" size={24} color="#f59e0b" />
+            <Text style={styles.statLabel}>W/L</Text>
+            <Text style={styles.statValue}>{stats.wins}/{stats.losses}</Text>
           </View>
         </View>
-      )}
 
-      {/* Main Content */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="email@example.com"
-            placeholderTextColor="#666"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#666"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Account Mode</Text>
-          <View style={styles.modeContainer}>
+        {/* Configuration Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>CONFIGURATION</Text>
+          
+          {/* Account Mode */}
+          <View style={styles.modeSelector}>
             <TouchableOpacity 
-              style={[styles.modeButton, mode === 'PRACTICE' && styles.modeButtonActive]}
+              style={[styles.modeOption, mode === 'PRACTICE' && styles.modeOptionActive]}
               onPress={() => setMode('PRACTICE')}
             >
-              <Text style={[styles.modeText, mode === 'PRACTICE' && styles.modeTextActive]}>Demo</Text>
+              <Text style={[styles.modeText, mode === 'PRACTICE' && styles.modeTextActive]}>DEMO ACCOUNT</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.modeButton, mode === 'REAL' && styles.modeButtonActive]}
+              style={[styles.modeOption, mode === 'REAL' && styles.modeOptionActive]}
               onPress={() => setMode('REAL')}
             >
-              <Text style={[styles.modeText, mode === 'REAL' && styles.modeTextActive]}>Real</Text>
+              <Text style={[styles.modeText, mode === 'REAL' && styles.modeTextActive]}>REAL ACCOUNT</Text>
             </TouchableOpacity>
           </View>
-        </View>
 
-        <View style={styles.inputGroup}>
-            <View style={styles.switchContainer}>
-                <View>
-                    <Text style={styles.label}>Auto Trading</Text>
-                    <Text style={styles.subLabel}>{autoTrading ? 'Bot will place trades automatically' : 'Bot will only send signals'}</Text>
-                </View>
-                <Switch
-                    trackColor={{ false: "#767577", true: "#2563eb" }}
-                    thumbColor={autoTrading ? "#fff" : "#f4f3f4"}
-                    ios_backgroundColor="#3e3e3e"
-                    onValueChange={setAutoTrading}
-                    value={autoTrading}
-                />
+          {/* Credentials */}
+          <View style={styles.inputContainer}>
+            <MaterialCommunityIcons name="email-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email Address"
+              placeholderTextColor="#64748b"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+          </View>
+          <View style={styles.inputContainer}>
+            <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#64748b"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+          </View>
+
+          {/* Trading Settings Grid */}
+          <View style={styles.gridContainer}>
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>Amount ($)</Text>
+              <TextInput
+                style={styles.gridInput}
+                placeholder="1"
+                placeholderTextColor="#64748b"
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+              />
             </View>
-        </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>Time (Min)</Text>
+              <TextInput
+                style={styles.gridInput}
+                placeholder="1"
+                placeholderTextColor="#64748b"
+                value={duration}
+                onChangeText={setDuration}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>Stop Loss ($)</Text>
+              <TextInput
+                style={styles.gridInput}
+                placeholder="10"
+                placeholderTextColor="#64748b"
+                value={stopLoss}
+                onChangeText={setStopLoss}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.gridItem}>
+              <Text style={styles.gridLabel}>Take Profit ($)</Text>
+              <TextInput
+                style={styles.gridInput}
+                placeholder="20"
+                placeholderTextColor="#64748b"
+                value={takeProfit}
+                onChangeText={setTakeProfit}
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
 
-        <View style={styles.rowContainer}>
-          <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-            <Text style={styles.label}>Amount ($)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="1"
-              placeholderTextColor="#666"
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="numeric"
+          {/* Advanced Settings */}
+          <View style={styles.settingRow}>
+             <View style={{flex: 1}}>
+                <Text style={styles.settingLabel}>Max Consecutive Losses</Text>
+                <Text style={styles.settingSubLabel}>Auto-stop after N losses</Text>
+             </View>
+             <TextInput
+                style={styles.smallInput}
+                placeholder="2"
+                placeholderTextColor="#64748b"
+                value={maxConsecutiveLosses}
+                onChangeText={setMaxConsecutiveLosses}
+                keyboardType="numeric"
+              />
+          </View>
+
+          <View style={styles.settingRow}>
+             <View style={{flex: 1}}>
+                <Text style={styles.settingLabel}>Max Trades per Session</Text>
+                <Text style={styles.settingSubLabel}>Stop after N trades (0=Unlimited)</Text>
+             </View>
+             <TextInput
+                style={styles.smallInput}
+                placeholder="0"
+                placeholderTextColor="#64748b"
+                value={maxTrades}
+                onChangeText={setMaxTrades}
+                keyboardType="numeric"
+              />
+          </View>
+
+          <View style={styles.settingRow}>
+             <View style={{flex: 1}}>
+                <Text style={styles.settingLabel}>Auto Trading</Text>
+                <Text style={styles.settingSubLabel}>{autoTrading ? 'Active Trading' : 'Signal Mode Only'}</Text>
+             </View>
+             <Switch
+                trackColor={{ false: "#334155", true: "#3b82f6" }}
+                thumbColor={autoTrading ? "#fff" : "#cbd5e1"}
+                ios_backgroundColor="#334155"
+                onValueChange={setAutoTrading}
+                value={autoTrading}
             />
           </View>
-          <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>Time (min)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="1"
-              placeholderTextColor="#666"
-              value={duration}
-              onChangeText={setDuration}
-              keyboardType="numeric"
-            />
-          </View>
+
         </View>
 
-        <View style={styles.rowContainer}>
-          <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-            <Text style={styles.label}>Stop Loss ($)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="10"
-              placeholderTextColor="#666"
-              value={stopLoss}
-              onChangeText={setStopLoss}
-              keyboardType="numeric"
-            />
-          </View>
-          <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>Take Profit ($)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="20"
-              placeholderTextColor="#666"
-              value={takeProfit}
-              onChangeText={setTakeProfit}
-              keyboardType="numeric"
-            />
-          </View>
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Max Consecutive Losses (0 to disable)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="2"
-            placeholderTextColor="#666"
-            value={maxConsecutiveLosses}
-            onChangeText={setMaxConsecutiveLosses}
-            keyboardType="numeric"
-          />
-        </View>
-
+        {/* Action Button */}
         <TouchableOpacity 
-          style={[styles.button, isRunning ? styles.stopButton : styles.startButton]}
+          style={[styles.mainButton, isRunning ? styles.stopButton : styles.startButton]}
           onPress={isRunning ? handleStop : handleStart}
+          activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>
-            {isRunning ? 'STOP BOT' : 'START BOT'}
+          <MaterialCommunityIcons name={isRunning ? "stop-circle-outline" : "play-circle-outline"} size={28} color="#fff" />
+          <Text style={styles.mainButtonText}>
+            {isRunning ? 'TERMINATE SESSION' : 'INITIATE TRADING'}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
 
-      {/* Logs Area */}
-      <View style={styles.logsContainer}>
-        <Text style={styles.logsTitle}>System Logs</Text>
-        <ScrollView style={styles.logsScrollView} nestedScrollEnabled={true}>
-          {logs.map((log, index) => (
-            <Text key={index} style={styles.logText}>{log}</Text>
-          ))}
-          {logs.length === 0 && (
-            <Text style={styles.emptyLogText}>Waiting for activity...</Text>
-          )}
-        </ScrollView>
-      </View>
+        {/* System Logs */}
+        <View style={styles.logsSection}>
+          <View style={styles.logsHeader}>
+            <MaterialCommunityIcons name="console-line" size={16} color="#94a3b8" />
+            <Text style={styles.logsTitle}>SYSTEM LOGS</Text>
+          </View>
+          <ScrollView style={styles.logsConsole} nestedScrollEnabled={true}>
+            {logs.length === 0 ? (
+              <Text style={styles.logPlaceholder}>Waiting for system events...</Text>
+            ) : (
+              logs.map((log, index) => (
+                <Text key={index} style={styles.logLine}>
+                  <Text style={styles.logTimestamp}>{log.split(']')[0]}]</Text>
+                  <Text style={styles.logContent}>{log.split(']')[1]}</Text>
+                </Text>
+              ))
+            )}
+          </ScrollView>
+        </View>
+
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#0f172a', // Slate 900
+    paddingTop: Platform.OS === 'android' ? 40 : 0,
+  },
+  mainScrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 40,
   },
   header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    backgroundColor: '#1f2937',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    backgroundColor: '#0f172a',
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#1e293b',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 1,
+  },
+  headerTitleAccent: {
+    color: '#3b82f6', // Blue 500
+  },
+  headerSubtitle: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  statusText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  
+  // Dashboard
+  dashboardContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    marginBottom: 24,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 15,
-    backgroundColor: '#1f2937',
-    marginBottom: 10,
-    marginHorizontal: 20,
-    borderRadius: 8,
-  },
-  statBox: {
+  statCard: {
+    flex: 1,
+    backgroundColor: '#1e293b', // Slate 800
+    padding: 12,
+    borderRadius: 12,
+    marginHorizontal: 4,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   statLabel: {
-    color: '#9ca3af',
-    fontSize: 12,
-    marginBottom: 4,
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 8,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
   statValue: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
+    marginTop: 4,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#374151',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusText: {
-    color: '#e5e7eb',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-    marginTop: 20,
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  rowContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    color: '#9ca3af',
-    marginBottom: 8,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  subLabel: {
-    color: '#6b7280',
-    fontSize: 12,
-    marginTop: -4,
-  },
-  switchContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#1f2937',
-    padding: 12,
-    borderRadius: 8,
+
+  // Section
+  sectionContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#334155',
   },
-  modeContainer: {
+  sectionTitle: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 16,
+    letterSpacing: 1,
+  },
+
+  // Mode Selector
+  modeSelector: {
     flexDirection: 'row',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#0f172a',
     borderRadius: 8,
     padding: 4,
-    borderWidth: 1,
-    borderColor: '#374151',
+    marginBottom: 20,
   },
-  modeButton: {
+  modeOption: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 10,
     alignItems: 'center',
     borderRadius: 6,
   },
-  modeButtonActive: {
-    backgroundColor: '#2563eb',
+  modeOptionActive: {
+    backgroundColor: '#334155',
   },
   modeText: {
-    color: '#9ca3af',
+    color: '#64748b',
     fontWeight: '600',
+    fontSize: 12,
   },
   modeTextActive: {
     color: '#fff',
   },
-  input: {
-    backgroundColor: '#1f2937',
-    borderRadius: 8,
-    padding: 12,
-    color: '#fff',
-    borderWidth: 1,
-    borderColor: '#374151',
-    fontSize: 16,
-  },
-  button: {
-    padding: 16,
-    borderRadius: 8,
+
+  // Inputs
+  inputContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 12,
+    paddingHorizontal: 12,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    color: '#fff',
+    paddingVertical: 14,
+    fontSize: 15,
+  },
+
+  // Grid
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -6,
+    marginBottom: 12,
+  },
+  gridItem: {
+    width: '50%',
+    paddingHorizontal: 6,
+    marginBottom: 12,
+  },
+  gridLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  gridInput: {
+    backgroundColor: '#0f172a',
+    color: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Settings Row
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  settingLabel: {
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  settingSubLabel: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  smallInput: {
+    backgroundColor: '#0f172a',
+    color: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+    textAlign: 'center',
+    width: 60,
+  },
+
+  // Buttons
+  mainButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+    borderRadius: 16,
+    marginBottom: 24,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   startButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#2563eb', // Blue 600
   },
   stopButton: {
-    backgroundColor: '#dc2626',
+    backgroundColor: '#dc2626', // Red 600
+    shadowColor: '#dc2626',
   },
-  buttonText: {
+  mainButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 1,
   },
-  logsContainer: {
-    height: 200, // Fixed height for logs
+
+  // Logs
+  logsSection: {
     backgroundColor: '#000',
-    margin: 20,
-    marginTop: 0,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#334155',
     overflow: 'hidden',
   },
+  logsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#1e293b',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
   logsTitle: {
-    color: '#9ca3af',
-    fontSize: 12,
-    fontWeight: '600',
-    padding: 10,
-    backgroundColor: '#1f2937',
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+    marginLeft: 8,
   },
-  logsScrollView: {
-    flex: 1,
-    padding: 10,
+  logsConsole: {
+    height: 180,
+    padding: 12,
   },
-  logText: {
-    color: '#4ade80',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 12,
+  logLine: {
     marginBottom: 4,
   },
-  emptyLogText: {
-    color: '#4b5563',
-    fontStyle: 'italic',
+  logTimestamp: {
+    color: '#64748b',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
+  },
+  logContent: {
+    color: '#4ade80', // Green 400
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
+  },
+  logPlaceholder: {
+    color: '#334155',
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: 60,
+    fontStyle: 'italic',
   },
 });
