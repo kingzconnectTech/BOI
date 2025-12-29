@@ -5,7 +5,7 @@ import axios from 'axios';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 // Backend URL
-const API_URL = 'http://192.168.43.76:8001'; 
+const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
 
 export default function App() {
