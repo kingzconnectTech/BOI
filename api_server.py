@@ -184,7 +184,10 @@ def start_bot(req: StartRequest):
             config.ASSETS = open_pairs
             bot.add_log(f"Trading on {len(open_pairs)} open pairs: {', '.join(open_pairs[:5])}...")
         else:
-            bot.add_log("Warning: No open pairs found or fetch failed.")
+            bot.add_log("Error: No paying pairs found! Bot stopped.")
+            bot.is_running = False
+            data_feed.connected = False
+            raise HTTPException(status_code=400, detail="No active paying pairs found. Market may be closed.")
             
         return {"status": "started", "balance": bot.start_balance}
     else:

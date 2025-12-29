@@ -101,33 +101,57 @@ class DataFeed:
 
     def get_open_pairs(self):
         """
-        Returns a list of currently open pairs (binary options).
+        Returns a list of currently open pairs (binary options) based on PAYOUTS.
+        We prioritize get_all_profit() because if an asset is paying, it is tradeable.
         """
         if not self.check_connection():
             return []
         
         try:
-            # Get all open options
-            # This returns a dict of all open assets
+            logger.info("Fetching all profits to determine active assets...")
+            all_profits = self.api.get_all_profit()
+            
+            open_paying_pairs = []
+            
+            if isinstance(all_profits, dict):
+                for pair, profit_data in all_profits.items():
+                    is_paying = False
+                    
+                    # profit_data can be a dict {'turbo': 0.85, 'binary': 0.80} 
+                    # or sometimes a float directly depending on API version/state
+                    if isinstance(profit_data, dict):
+                        if profit_data.get('turbo', 0) > 0.01 or profit_data.get('binary', 0) > 0.01:
+                            is_paying = True
+                    elif isinstance(profit_data, (int, float)) and profit_data > 0.01:
+                         is_paying = True
+                    
+                    if is_paying:
+                        open_paying_pairs.append(pair)
+            
+            # Filter out non-pairs (sometimes stocks/commodities appear if not filtered?)
+            # Usually IQ Option API pairs are like "EURUSD", "EURUSD-OTC", "USDJPY", etc.
+            # We might want to filter for length > 3 or contains uppercase.
+            
+            if open_paying_pairs:
+                logger.info(f"Found {len(open_paying_pairs)} active paying pairs via get_all_profit.")
+                return open_paying_pairs
+            
+            # Fallback to schedule if profit check fails completely (unexpected)
+            logger.warning("get_all_profit returned no paying pairs. Falling back to schedule check...")
+            
             all_assets = self.api.get_all_open_time()
-            
-            # Filter for binary/turbo options that are open
-            open_pairs = []
-            
-            # Check turbo (short term)
+            scheduled_open = set()
             if 'turbo' in all_assets:
                 for pair, data in all_assets['turbo'].items():
                     if data['open']:
-                        open_pairs.append(pair)
-                        
-            # Check binary (longer term) if turbo is empty or we want both
+                        scheduled_open.add(pair)
             if 'binary' in all_assets:
                  for pair, data in all_assets['binary'].items():
-                    if data['open'] and pair not in open_pairs:
-                        open_pairs.append(pair)
+                    if data['open']:
+                        scheduled_open.add(pair)
             
-            logger.info(f"Found {len(open_pairs)} open pairs.")
-            return open_pairs
+            return list(scheduled_open)
+
         except Exception as e:
             logger.error(f"Error fetching open pairs: {e}")
             return []
