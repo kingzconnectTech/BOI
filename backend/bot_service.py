@@ -171,7 +171,13 @@ class IQBot:
             direction = action
             
             # Expiry Rule: Use User Defined Duration
-            expiry_duration = self.trade_duration 
+            # STRATEGY OVERRIDE: 1 min chart -> 2 min expiry
+            expiry_duration = 2 
+            
+            # Money Management: Risk 1-2% per trade
+            # Cap trade amount at 2% of balance
+            safe_max = max(1.0, self.balance * 0.02)
+            actual_amount = min(self.trade_amount, safe_max)
             
             # Check Auto Trading
             if not self.auto_trading:
@@ -179,11 +185,11 @@ class IQBot:
                 return True 
 
             # Place Trade
-            check, id = self.api.buy(self.trade_amount, pair, direction, expiry_duration)
+            check, id = self.api.buy(actual_amount, pair, direction, expiry_duration)
             if check:
                 self.trade_in_progress = True
-                self.add_log(f"Trade placed: {pair} {direction} ${self.trade_amount} ({expiry_duration}m)")
-                threading.Thread(target=self._check_trade_result, args=(id,)).start()
+                self.add_log(f"Trade placed: {pair} {direction} ${actual_amount:.2f} ({expiry_duration}m)")
+                threading.Thread(target=self._check_trade_result, args=(id, expiry_duration)).start()
                 self.update_balance()
                 return True
             else:
@@ -231,8 +237,12 @@ class IQBot:
             is_uptrend = c_ema20 > c_ema50 and c_rsi > 50
             is_downtrend = c_ema20 < c_ema50 and c_rsi < 50
             
-            # Avoid flat/crossing EMAs (simple check: distance)
-            # if abs(c_ema20 - c_ema50) < threshold: return None
+            # EMA Separation Check (Avoid flat/crossing)
+            # Threshold: 0.005% of price
+            ema_dist = abs(c_ema20 - c_ema50)
+            min_dist = c_close * 0.00005 
+            if ema_dist < min_dist:
+                return None
             
             if not is_uptrend and not is_downtrend:
                 return None
@@ -240,7 +250,24 @@ class IQBot:
             # RSI Filter (45-55 NO TRADE)
             if 45 <= c_rsi <= 55:
                 return None
+
+            # Volatility Check
+            # Calculate average body size of last 10 candles
+            last_bodies = np.abs(close_prices[-12:-2] - open_prices[-12:-2])
+            avg_body = np.mean(last_bodies)
+            
+            # Current (forming) body size
+            # For confirmation, we look at last CLOSED candle (idx -2)
+            c_body_size = abs(c_close - c_open)
+            
+            # 1. Low Volatility (Doji/Small)
+            if c_body_size < avg_body * 0.2:
+                return None
                 
+            # 2. Impulse Candle (Huge) -> Avoid Exhaustion
+            if c_body_size > avg_body * 3.0:
+                return None
+
             # Step 2 & 3: Pullback + Confirmation
             
             # CALL SCENARIO
@@ -280,12 +307,10 @@ class IQBot:
                 # 1. Bullish Engulfing
                 is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
                 # 2. Strong Bullish (Body size)
-                body_size = abs(c_close - c_open)
-                avg_body = np.mean(np.abs(close_prices[-7:-2] - open_prices[-7:-2]))
-                is_strong = body_size > avg_body
+                is_strong = c_body_size > avg_body
                 # 3. Rejection (Long lower wick)
                 lower_wick = c_open - c_low if is_bullish else c_close - c_low
-                is_rejection = lower_wick > body_size * 0.5 # Wick is significant
+                is_rejection = lower_wick > c_body_size * 0.5 # Wick is significant
                 
                 if is_engulfing or is_strong or is_rejection:
                     return "call"
@@ -316,12 +341,10 @@ class IQBot:
                 # 1. Bearish Engulfing
                 is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
                 # 2. Strong Bearish
-                body_size = abs(c_open - c_close)
-                avg_body = np.mean(np.abs(close_prices[-7:-2] - open_prices[-7:-2]))
-                is_strong = body_size > avg_body
+                is_strong = c_body_size > avg_body
                 # 3. Rejection (Long upper wick)
                 upper_wick = c_high - c_open if is_bearish else c_high - c_close
-                is_rejection = upper_wick > body_size * 0.5
+                is_rejection = upper_wick > c_body_size * 0.5
                 
                 if is_engulfing or is_strong or is_rejection:
                     return "put"
@@ -332,11 +355,12 @@ class IQBot:
             print(f"Error in analysis: {e}")
             return None
 
-    def _check_trade_result(self, order_id):
+    def _check_trade_result(self, order_id, duration=None):
         try:
             # Wait for duration + buffer
             # We add a bit more buffer to ensure IQ Option has processed it
-            time.sleep(self.trade_duration * 60 + 5)
+            wait_time = (duration * 60) if duration else (self.trade_duration * 60)
+            time.sleep(wait_time + 5)
             
             result = None
             
@@ -377,12 +401,16 @@ class IQBot:
                 elif self.take_profit > 0 and self.total_profit >= self.take_profit:
                      self.add_log(f"Take Profit reached (+${self.take_profit}). Stopping bot.")
                      self.stop()
-                elif self.max_consecutive_losses > 0 and self.current_consecutive_losses >= self.max_consecutive_losses:
-                     self.add_log(f"Max consecutive losses reached ({self.current_consecutive_losses}). Stopping bot.")
-                     self.stop()
-                elif self.max_trades > 0 and self.trades_taken >= self.max_trades:
-                     self.add_log(f"Max trades limit reached ({self.trades_taken}). Stopping bot.")
-                     self.stop()
+                else:
+                    # Enforce Strategy Rule: 2 consecutive losses -> STOP (Default if not set)
+                    limit_consecutive = self.max_consecutive_losses if self.max_consecutive_losses > 0 else 2
+                    
+                    if self.current_consecutive_losses >= limit_consecutive:
+                        self.add_log(f"Max consecutive losses reached ({self.current_consecutive_losses}). Stopping bot.")
+                        self.stop()
+                    elif self.max_trades > 0 and self.trades_taken >= self.max_trades:
+                        self.add_log(f"Max trades limit reached ({self.trades_taken}). Stopping bot.")
+                        self.stop()
 
             else:
                 self.add_log(f"Warning: Could not fetch result for trade {order_id}")
