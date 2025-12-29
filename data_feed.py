@@ -21,6 +21,10 @@ class DataFeed:
         self.account_type = "PRACTICE"
         self.last_balance = 0.0
         self.conn_lock = threading.Lock()
+        self.last_trade_ts = 0
+        self.grace_seconds = 6
+        self.fail_count = 0
+        self.iq_cooldown_until = 0
 
     def disconnect(self):
         print("Disconnect called.") # Debug log
@@ -178,6 +182,11 @@ class DataFeed:
         target_symbol = symbol if symbol else self.symbol
         
         df = None
+        now = time.time()
+        # Respect IQ cooldown window if set
+        if self.iq_cooldown_until and now < self.iq_cooldown_until:
+            return self._fetch_yf_data(target_symbol, period, interval)
+        
         if self.use_iq and self.is_connected:
             df = self._fetch_iq_data(target_symbol, interval)
             if df is not None and not df.empty:
@@ -187,6 +196,11 @@ class DataFeed:
             df = self._fetch_iq_data(target_symbol, interval)
             if df is not None and not df.empty:
                 return df
+        
+        # If we were in cooldown and it's over, try IQ again next time
+        if self.iq_cooldown_until and now >= self.iq_cooldown_until:
+            self.iq_cooldown_until = 0
+            self.fail_count = 0
         # Final fallback to yfinance
         return self._fetch_yf_data(target_symbol, period, interval)
 
@@ -194,6 +208,10 @@ class DataFeed:
         """
         Fetches candles from IQ Option with aggressive reconnection logic.
         """
+        # Grace period after a trade to avoid immediate ws churn
+        if self.last_trade_ts and (time.time() - self.last_trade_ts) < self.grace_seconds:
+            return None
+        
         iq_symbol = symbol.replace("=X", "").replace("/", "")
         
         # Interval map
@@ -208,8 +226,11 @@ class DataFeed:
             
             for attempt in range(max_retries):
                 try:
-                    candles = self.iq_api.get_candles(iq_symbol, size, 1000, endtime)
+                    # Avoid racing with reconnect by sharing the conn lock
+                    with self.conn_lock:
+                        candles = self.iq_api.get_candles(iq_symbol, size, 300, endtime)
                     if candles:
+                        self.fail_count = 0
                         break
                     
                     # If candles is empty, it means internal state is bad.
@@ -224,11 +245,16 @@ class DataFeed:
                     if "reconnect" in err_str or "closed" in err_str or "ssl" in err_str:
                         print("Critical Connection Error Detected. Forcing Reset.")
                         self.is_connected = False
+                        self.fail_count += 1
                         if self.ensure_connection(mode="hard"):
                             print("Re-init success after critical error.")
                             continue
                         else:
                             print("Re-init failed after critical error.")
+                            if self.fail_count >= 2:
+                                # Back off IQ for 60 seconds
+                                self.iq_cooldown_until = time.time() + 60
+                                return None
                     
                     if attempt < max_retries - 1:
                         time.sleep(2) # Increased sleep
@@ -242,13 +268,10 @@ class DataFeed:
                             
                             if attempt == 0:
                                 try:
-                                    if not self.iq_api.check_connect():
-                                        print("Reconnecting (Simple)...")
-                                        check, reason = self.iq_api.connect()
-                                        if check:
-                                            print("Simple reconnection successful.")
-                                            reconnect_success = True
-                                            self.is_connected = True
+                                    if self.ensure_connection(mode="soft"):
+                                        print("Simple reconnection successful.")
+                                        reconnect_success = True
+                                        self.is_connected = True
                                 except Exception as conn_err:
                                     print(f"Simple reconnection failed: {conn_err}")
                             
@@ -377,6 +400,7 @@ class DataFeed:
             
             if check:
                 time.sleep(2)  # small pause to let ws stabilize post-trade
+                self.last_trade_ts = time.time()
                 return True, {'id': id, 'type': 'BINARY'}, "Trade Placed"
             else:
                 return False, None, "Trade Failed (API returned False)"
