@@ -138,21 +138,28 @@ class IQBot:
                 # Scan pairs sequentially to ensure deterministic behavior
                 # random.shuffle(pairs_to_scan) - Removed as per request
                 
+                self.add_log("Starting market scan...")
+
                 for pair in pairs_to_scan:
                     if not self.is_running: break
                     
                     # Double check if trade started during loop
-                    if self.trade_in_progress: break
+                    if self.trade_in_progress: 
+                        self.add_log("Trade in progress. Pausing analysis.")
+                        break
 
                     try:
+                        self.add_log(f"Analysing {pair}...")
                         if self._process_pair(pair):
                             # Trade placed, break loop to wait for it to finish
                             break
                     except Exception as e:
                         print(f"Error processing {pair}: {e}")
+                        self.add_log(f"Error analysing {pair}: {str(e)}")
                         # traceback.print_exc()
                         
-                time.sleep(1) # Wait a bit before next scan cycle
+                self.add_log("Scan complete. Waiting...")
+                time.sleep(2) # Wait a bit before next scan cycle
             except Exception as e:
                 print(f"Error in trading loop: {e}")
                 traceback.print_exc()
@@ -487,16 +494,19 @@ class IQBot:
 class BotManager:
     def __init__(self):
         self.bots = {} # {email: IQBot()}
+        self.lock = threading.Lock()
     
     def get_bot(self, email):
-        if email not in self.bots:
-            self.bots[email] = IQBot()
-        return self.bots[email]
+        with self.lock:
+            if email not in self.bots:
+                self.bots[email] = IQBot()
+            return self.bots[email]
     
     def remove_bot(self, email):
-        if email in self.bots:
-            self.bots[email].disconnect()
-            del self.bots[email]
+        with self.lock:
+            if email in self.bots:
+                self.bots[email].disconnect()
+                del self.bots[email]
 
 # Global instance manager
 bot_manager = BotManager()
