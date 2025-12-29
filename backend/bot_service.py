@@ -22,8 +22,8 @@ class IQBot:
         self.stop_loss = 0
         self.take_profit = 0
         self.max_consecutive_losses = 0
+        self.auto_trading = True
         
-        # Session Stats
         self.initial_balance = 0
         self.total_profit = 0
         self.wins = 0
@@ -32,13 +32,13 @@ class IQBot:
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
 
-    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses):
+    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, auto_trading=True):
         self.trade_amount = amount
         self.trade_duration = duration
         self.stop_loss = stop_loss
         self.take_profit = take_profit
         self.max_consecutive_losses = max_consecutive_losses
-
+        self.auto_trading = auto_trading
     def reset_stats(self):
         self.total_profit = 0
         self.wins = 0
@@ -138,7 +138,12 @@ class IQBot:
         direction = random.choice(["call", "put"])
             
         if direction:
-            # 4. Place Trade
+            # 4. Check Auto Trading
+            if not self.auto_trading:
+                self.add_log(f"SIGNAL: {pair} {direction.upper()} (Simulation)")
+                return True # Indicate we 'processed' it so loop breaks
+
+            # 5. Place Trade
             check, id = self.api.buy(self.trade_amount, pair, direction, self.trade_duration)
             if check:
                 self.trade_in_progress = True
@@ -195,6 +200,9 @@ class IQBot:
                      self.stop()
                 elif self.take_profit > 0 and self.total_profit >= self.take_profit:
                      self.add_log(f"Take Profit reached (+${self.take_profit}). Stopping bot.")
+                     self.stop()
+                elif self.max_consecutive_losses > 0 and self.current_consecutive_losses >= self.max_consecutive_losses:
+                     self.add_log(f"Max consecutive losses reached ({self.current_consecutive_losses}). Stopping bot.")
                      self.stop()
 
             else:

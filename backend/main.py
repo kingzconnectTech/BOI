@@ -24,6 +24,8 @@ class LoginRequest(BaseModel):
     duration: int = 1
     stop_loss: float = 0.0
     take_profit: float = 0.0
+    max_consecutive_losses: int = 0
+    auto_trading: bool = True
 
 @app.get("/")
 def read_root():
@@ -39,7 +41,8 @@ def start_bot(login_data: LoginRequest):
         login_data.duration, 
         login_data.stop_loss, 
         login_data.take_profit,
-        login_data.max_consecutive_losses
+        login_data.max_consecutive_losses,
+        login_data.auto_trading
     )
     
     success, message = bot_instance.connect(login_data.email, login_data.password, login_data.mode)

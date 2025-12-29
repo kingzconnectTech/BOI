@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import axios from 'axios';
 
@@ -18,6 +18,8 @@ export default function App() {
   const [duration, setDuration] = useState('1');
   const [stopLoss, setStopLoss] = useState('10');
   const [takeProfit, setTakeProfit] = useState('20');
+  const [maxConsecutiveLosses, setMaxConsecutiveLosses] = useState('2');
+  const [autoTrading, setAutoTrading] = useState(true);
   const [stats, setStats] = useState({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
   const [backendStatus, setBackendStatus] = useState('Checking...');
   const [logs, setLogs] = useState([]);
@@ -84,11 +86,12 @@ export default function App() {
         email: email,
         password: password,
         mode: mode,
-        amount: parseFloat(amount),
-        duration: parseInt(duration),
-        stop_loss: parseFloat(stopLoss),
-        take_profit: parseFloat(takeProfit),
-        max_consecutive_losses: parseInt(maxConsecutiveLosses)
+        amount: parseFloat(amount) || 1,
+        duration: parseInt(duration) || 1,
+        stop_loss: parseFloat(stopLoss) || 0,
+        take_profit: parseFloat(takeProfit) || 0,
+        max_consecutive_losses: parseInt(maxConsecutiveLosses) || 0,
+        auto_trading: autoTrading
       });
       
       if (response.data.status === 'started') {
@@ -128,9 +131,10 @@ export default function App() {
         </View>
       </View>
 
-      {/* Stats Board */}
-      {isRunning && (
-        <View style={styles.statsContainer}>
+      <ScrollView style={styles.mainScrollView}>
+        {/* Stats Board */}
+        {isRunning && (
+          <View style={styles.statsContainer}>
           <View style={styles.statBox}>
              <Text style={styles.statLabel}>Profit</Text>
              <Text style={[styles.statValue, { color: stats.profit >= 0 ? '#4ade80' : '#ef4444' }]}>
@@ -149,7 +153,7 @@ export default function App() {
       )}
 
       {/* Main Content */}
-      <View style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Email</Text>
           <TextInput
@@ -191,6 +195,22 @@ export default function App() {
               <Text style={[styles.modeText, mode === 'REAL' && styles.modeTextActive]}>Real</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        <View style={styles.inputGroup}>
+            <View style={styles.switchContainer}>
+                <View>
+                    <Text style={styles.label}>Auto Trading</Text>
+                    <Text style={styles.subLabel}>{autoTrading ? 'Bot will place trades automatically' : 'Bot will only send signals'}</Text>
+                </View>
+                <Switch
+                    trackColor={{ false: "#767577", true: "#2563eb" }}
+                    thumbColor={autoTrading ? "#fff" : "#f4f3f4"}
+                    ios_backgroundColor="#3e3e3e"
+                    onValueChange={setAutoTrading}
+                    value={autoTrading}
+                />
+            </View>
         </View>
 
         <View style={styles.rowContainer}>
@@ -263,12 +283,12 @@ export default function App() {
             {isRunning ? 'STOP BOT' : 'START BOT'}
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       {/* Logs Area */}
       <View style={styles.logsContainer}>
         <Text style={styles.logsTitle}>System Logs</Text>
-        <ScrollView style={styles.logsScrollView}>
+        <ScrollView style={styles.logsScrollView} nestedScrollEnabled={true}>
           {logs.map((log, index) => (
             <Text key={index} style={styles.logText}>{log}</Text>
           ))}
@@ -277,6 +297,7 @@ export default function App() {
           )}
         </ScrollView>
       </View>
+      </ScrollView>
     </View>
   );
 }
@@ -345,7 +366,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    marginTop: 20,
+  },
+  scrollContent: {
+    paddingBottom: 20,
   },
   rowContainer: {
     flexDirection: 'row',
@@ -360,6 +385,21 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 14,
     fontWeight: '500',
+  },
+  subLabel: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginTop: -4,
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1f2937',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
   },
   modeContainer: {
     flexDirection: 'row',
