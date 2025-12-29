@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     wget \
     tar \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TA-Lib C library

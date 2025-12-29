@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-iqoptionapi
+git+https://github.com/Lu-Yi-Hsun/iqoptionapi.git
 python-dotenv
 pandas
 numpy
