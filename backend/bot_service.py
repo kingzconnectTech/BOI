@@ -475,5 +475,19 @@ class IQBot:
             }
         }
 
-# Global instance
-bot_instance = IQBot()
+class BotManager:
+    def __init__(self):
+        self.bots = {} # {email: IQBot()}
+    
+    def get_bot(self, email):
+        if email not in self.bots:
+            self.bots[email] = IQBot()
+        return self.bots[email]
+    
+    def remove_bot(self, email):
+        if email in self.bots:
+            self.bots[email].stop()
+            del self.bots[email]
+
+# Global instance manager
+bot_manager = BotManager()

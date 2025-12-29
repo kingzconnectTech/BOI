@@ -20,13 +20,14 @@ Notifications.setNotificationHandler({
 });
 
 export default function App() {
+  const [page, setPage] = useState('login'); // 'login' or 'dashboard'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState('PRACTICE'); // PRACTICE or REAL
   const [amount, setAmount] = useState('1');
   const [duration, setDuration] = useState('1');
-  const [stopLoss, setStopLoss] = useState('10');
-  const [takeProfit, setTakeProfit] = useState('20');
+  const [stopLoss, setStopLoss] = useState('1');
+  const [takeProfit, setTakeProfit] = useState('5');
   const [maxConsecutiveLosses, setMaxConsecutiveLosses] = useState('2');
   const [maxTrades, setMaxTrades] = useState('0'); // 0 = unlimited
   const [autoTrading, setAutoTrading] = useState(true);
@@ -41,22 +42,25 @@ export default function App() {
     checkBackend();
   }, []);
 
-  // Poll for logs and stats when bot is running
+  // Poll for logs and stats when dashboard is active
   useEffect(() => {
     let interval;
-    if (isRunning) {
+    if (page === 'dashboard') {
       interval = setInterval(async () => {
         try {
+          if (!email) return;
+
           // Get Logs
-          const logsResponse = await axios.get(`${API_URL}/logs`);
+          const logsResponse = await axios.get(`${API_URL}/logs?email=${email}`);
           if (logsResponse.data.logs && logsResponse.data.logs.length > 0) {
             setLogs(logsResponse.data.logs.reverse());
           }
           
           // Get Stats (Status)
-          const statusResponse = await axios.get(`${API_URL}/status`);
-          if (statusResponse.data.stats) {
+          const statusResponse = await axios.get(`${API_URL}/status?email=${email}`);
+          if (statusResponse.data) {
             setStats(statusResponse.data.stats);
+            setIsRunning(statusResponse.data.running);
           }
         } catch (error) {
           console.log("Error fetching data:", error.message);
@@ -64,7 +68,7 @@ export default function App() {
       }, 2000);
     }
     return () => clearInterval(interval);
-  }, [isRunning]);
+  }, [page, email]);
 
   const addLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -76,23 +80,24 @@ export default function App() {
       const response = await axios.get(API_URL);
       if (response.data.status === 'ok') {
         setBackendStatus('Connected');
-        addLog('Backend connected successfully');
       }
     } catch (error) {
       setBackendStatus('Disconnected');
-      addLog(`Backend connection failed: ${error.message}`);
     }
   };
 
-  const handleStart = async () => {
+  const handleLogin = async () => {
     if (!email || !password) {
-      addLog('Error: Please enter email and password');
+      alert('Please enter email and password');
       return;
     }
     
-    setIsRunning(true);
-    addLog('Connecting to IQ Option...');
-    
+    // We start the bot immediately upon login to verify credentials
+    // Note: This connects the bot but doesn't necessarily start trading unless autoTrading is true
+    await startBot();
+  };
+
+  const startBot = async () => {
     try {
       const response = await axios.post(`${API_URL}/start`, {
         email: email,
@@ -105,24 +110,25 @@ export default function App() {
         max_consecutive_losses: parseInt(maxConsecutiveLosses) || 0,
         max_trades: parseInt(maxTrades) || 0,
         auto_trading: autoTrading,
-        push_token: expoPushToken // Send push token
+        push_token: expoPushToken 
       });
       
       if (response.data.status === 'started') {
+        setPage('dashboard');
+        setIsRunning(true);
         addLog(`Success: ${response.data.message}`);
-        addLog(`Balance: ${response.data.data.currency} ${response.data.data.balance}`);
       }
     } catch (error) {
       setIsRunning(false);
       const errorMsg = error.response?.data?.detail || error.message;
-      addLog(`Error: ${errorMsg}`);
+      alert(`Login/Start Failed: ${errorMsg}`);
     }
   };
 
   const handleStop = async () => {
     try {
       addLog('Stopping bot...');
-      const response = await axios.post(`${API_URL}/stop`);
+      const response = await axios.post(`${API_URL}/stop`, { email: email });
       if (response.data.status === 'stopped') {
         setIsRunning(false);
         addLog('Bot stopped successfully');
@@ -130,6 +136,15 @@ export default function App() {
     } catch (error) {
       addLog(`Error stopping bot: ${error.message}`);
     }
+  };
+
+  const handleLogout = () => {
+      handleStop();
+      setPage('login');
+      setLogs([]);
+      setStats({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
+      setEmail('');
+      setPassword('');
   };
 
   async function registerForPushNotificationsAsync() {
@@ -155,15 +170,9 @@ export default function App() {
         alert('Failed to get push token for push notification!');
         return;
       }
-      // Learn more about projectId:
-      // https://docs.expo.dev/push-notifications/push-notifications-setup/#configure-projectid
-      // For bare workflow:
-      // token = (await Notifications.getExpoPushTokenAsync({ projectId: 'YOUR_PROJECT_ID' })).data;
-      // For managed workflow (like this):
       try {
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
         if (!projectId) {
-           // Fallback if projectId not found (development)
            token = (await Notifications.getExpoPushTokenAsync()).data;
         } else {
            token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
@@ -173,29 +182,77 @@ export default function App() {
       }
       console.log("Push Token:", token);
     } else {
-      alert('Must use physical device for Push Notifications');
+      // alert('Must use physical device for Push Notifications');
     }
   
     return token;
   }
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" backgroundColor="#0f172a" />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
-          <Text style={styles.headerSubtitle}>IQ Option Automated Trader</Text>
-        </View>
-        <View style={styles.statusBadge}>
-          <View style={[styles.statusDot, { backgroundColor: backendStatus === 'Connected' ? '#10b981' : '#ef4444' }]} />
-          <Text style={styles.statusText}>{backendStatus === 'Connected' ? 'ONLINE' : 'OFFLINE'}</Text>
-        </View>
-      </View>
+  const renderLogin = () => (
+      <View style={styles.loginContainer}>
+          <Text style={styles.loginTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
+          <Text style={styles.loginSubtitle}>Professional Trading Automation</Text>
+          
+          <View style={styles.loginCard}>
+             <View style={styles.inputContainer}>
+                <MaterialCommunityIcons name="email-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="IQ Option Email"
+                  placeholderTextColor="#64748b"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
+              <View style={styles.inputContainer}>
+                <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor="#64748b"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                />
+              </View>
 
+              <View style={styles.modeSelector}>
+                <TouchableOpacity 
+                  style={[styles.modeOption, mode === 'PRACTICE' && styles.modeOptionActive]}
+                  onPress={() => setMode('PRACTICE')}
+                >
+                  <Text style={[styles.modeText, mode === 'PRACTICE' && styles.modeTextActive]}>DEMO</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modeOption, mode === 'REAL' && styles.modeOptionActive]}
+                  onPress={() => setMode('REAL')}
+                >
+                  <Text style={[styles.modeText, mode === 'REAL' && styles.modeTextActive]}>REAL</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+                  <Text style={styles.loginButtonText}>LOGIN & CONNECT</Text>
+              </TouchableOpacity>
+          </View>
+          <Text style={styles.backendStatus}>Server: {backendStatus}</Text>
+      </View>
+  );
+
+  const renderDashboard = () => (
       <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Header with Logout */}
+        <View style={styles.dashboardHeader}>
+             <View>
+                <Text style={styles.headerTitle}>DASHBOARD</Text>
+                <Text style={styles.headerSubtitle}>{email}</Text>
+             </View>
+             <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+                 <MaterialCommunityIcons name="logout" size={20} color="#ef4444" />
+             </TouchableOpacity>
+        </View>
         
         {/* Stats Dashboard */}
         <View style={styles.dashboardContainer}>
@@ -220,49 +277,8 @@ export default function App() {
 
         {/* Configuration Section */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>CONFIGURATION</Text>
+          <Text style={styles.sectionTitle}>SETTINGS</Text>
           
-          {/* Account Mode */}
-          <View style={styles.modeSelector}>
-            <TouchableOpacity 
-              style={[styles.modeOption, mode === 'PRACTICE' && styles.modeOptionActive]}
-              onPress={() => setMode('PRACTICE')}
-            >
-              <Text style={[styles.modeText, mode === 'PRACTICE' && styles.modeTextActive]}>DEMO ACCOUNT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.modeOption, mode === 'REAL' && styles.modeOptionActive]}
-              onPress={() => setMode('REAL')}
-            >
-              <Text style={[styles.modeText, mode === 'REAL' && styles.modeTextActive]}>REAL ACCOUNT</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Credentials */}
-          <View style={styles.inputContainer}>
-            <MaterialCommunityIcons name="email-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email Address"
-              placeholderTextColor="#64748b"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
-          <View style={styles.inputContainer}>
-            <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor="#64748b"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
-          </View>
-
           {/* Trading Settings Grid */}
           <View style={styles.gridContainer}>
             <View style={styles.gridItem}>
@@ -345,7 +361,7 @@ export default function App() {
           <View style={styles.settingRow}>
              <View style={{flex: 1}}>
                 <Text style={styles.settingLabel}>Auto Trading</Text>
-                <Text style={styles.settingSubLabel}>{autoTrading ? 'Active Trading' : 'Signal Mode Only'}</Text>
+                <Text style={styles.settingSubLabel}>{autoTrading ? 'Active' : 'Signal Only'}</Text>
              </View>
              <Switch
                 trackColor={{ false: "#334155", true: "#3b82f6" }}
@@ -361,12 +377,12 @@ export default function App() {
         {/* Action Button */}
         <TouchableOpacity 
           style={[styles.mainButton, isRunning ? styles.stopButton : styles.startButton]}
-          onPress={isRunning ? handleStop : handleStart}
+          onPress={isRunning ? handleStop : startBot} // startBot here updates settings
           activeOpacity={0.8}
         >
           <MaterialCommunityIcons name={isRunning ? "stop-circle-outline" : "play-circle-outline"} size={28} color="#fff" />
           <Text style={styles.mainButtonText}>
-            {isRunning ? 'TERMINATE SESSION' : 'INITIATE TRADING'}
+            {isRunning ? 'STOP BOT' : 'UPDATE & START'}
           </Text>
         </TouchableOpacity>
 
@@ -391,6 +407,12 @@ export default function App() {
         </View>
 
       </ScrollView>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" backgroundColor="#0f172a" />
+      {page === 'login' ? renderLogin() : renderDashboard()}
     </SafeAreaView>
   );
 }
@@ -400,6 +422,72 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0f172a', // Slate 900
     paddingTop: Platform.OS === 'android' ? 40 : 0,
+  },
+  // Login Styles
+  loginContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+  },
+  loginTitle: {
+      fontSize: 32,
+      fontWeight: '800',
+      color: '#fff',
+      letterSpacing: 2,
+      marginBottom: 8,
+  },
+  loginSubtitle: {
+      color: '#64748b',
+      marginBottom: 40,
+      fontSize: 16,
+  },
+  loginCard: {
+      width: '100%',
+      backgroundColor: '#1e293b',
+      padding: 24,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: '#334155',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.3,
+      shadowRadius: 20,
+      elevation: 10,
+  },
+  loginButton: {
+      backgroundColor: '#3b82f6',
+      padding: 16,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginTop: 16,
+  },
+  loginButtonText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 16,
+      letterSpacing: 1,
+  },
+  backendStatus: {
+      marginTop: 20,
+      color: '#475569',
+      fontSize: 12,
+  },
+  dashboardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 24,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: '#1e293b',
+  },
+  logoutButton: {
+      padding: 8,
+      backgroundColor: '#1e293b',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#334155',
   },
   mainScrollView: {
     flex: 1,
@@ -684,8 +772,8 @@ const styles = StyleSheet.create({
   },
   logPlaceholder: {
     color: '#334155',
+    fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 60,
-    fontStyle: 'italic',
-  },
+  }
 });

@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import requests
-from bot_service import bot_instance
+from bot_service import bot_manager
 
 app = FastAPI()
 
@@ -48,16 +48,20 @@ class LoginRequest(BaseModel):
     auto_trading: bool = True
     push_token: str = None # Added for Push Notifications
 
+class StopRequest(BaseModel):
+    email: str
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Backend is running"}
 
 @app.post("/start")
 def start_bot(login_data: LoginRequest):
-    bot_instance.clear_logs() # Clear previous logs
+    bot = bot_manager.get_bot(login_data.email)
+    bot.clear_logs() # Clear previous logs
     
     # Set config
-    bot_instance.set_config(
+    bot.set_config(
         login_data.amount, 
         login_data.duration, 
         login_data.stop_loss, 
@@ -69,30 +73,33 @@ def start_bot(login_data: LoginRequest):
     
     # Set Push Token
     if login_data.push_token:
-        bot_instance.set_push_token(login_data.push_token)
+        bot.set_push_token(login_data.push_token)
     
-    success, message = bot_instance.connect(login_data.email, login_data.password, login_data.mode)
+    success, message = bot.connect(login_data.email, login_data.password, login_data.mode)
     if not success:
         raise HTTPException(status_code=400, detail=message)
     
     # Start auto trading loop
-    bot_instance.start_trading()
+    bot.start_trading()
     
-    status = bot_instance.get_status()
+    status = bot.get_status()
     return {"status": "started", "message": message, "data": status}
 
 @app.post("/stop")
-def stop_bot():
-    success, message = bot_instance.stop()
+def stop_bot(request: StopRequest):
+    bot = bot_manager.get_bot(request.email)
+    success, message = bot.stop()
     return {"status": "stopped", "message": message}
 
 @app.get("/status")
-def get_status():
-    return bot_instance.get_status()
+def get_status(email: str):
+    bot = bot_manager.get_bot(email)
+    return bot.get_status()
 
 @app.get("/logs")
-def get_logs():
-    return {"logs": bot_instance.get_logs()}
+def get_logs(email: str):
+    bot = bot_manager.get_bot(email)
+    return {"logs": bot.get_logs()}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8001))
