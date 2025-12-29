@@ -116,6 +116,11 @@ def stop_bot(request: StopRequest):
     success, message = bot.stop()
     return {"status": "stopped", "message": message}
 
+@app.post("/disconnect")
+def disconnect_bot(request: DisconnectRequest):
+    bot_manager.remove_bot(request.email)
+    return {"status": "disconnected", "message": "Bot disconnected and removed"}
+
 @app.get("/status")
 def get_status(email: str):
     bot = bot_manager.get_bot(email)

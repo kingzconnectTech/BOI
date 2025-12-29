@@ -136,8 +136,13 @@ export default function App() {
 
   const handleAppLogout = async () => {
     try {
-        if (isRunning) {
-            await handleStop();
+        if (email) {
+            // Ensure we disconnect the bot from backend before logging out
+            try {
+                await axios.post(`${API_URL}/disconnect`, { email });
+            } catch (e) {
+                console.log("Error disconnecting bot:", e);
+            }
         }
         await signOut(auth);
     } catch (error) {

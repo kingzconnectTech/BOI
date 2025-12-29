@@ -458,6 +458,14 @@ class IQBot:
             pass
         return True, "Bot stopped"
 
+    def disconnect(self):
+        self.stop()
+        self.connected = False
+        self.api = None
+        self.email = None
+        self.password = None
+        return True, "Disconnected"
+
     def get_status(self):
         win_rate = 0
         if self.trades_taken > 0:
@@ -487,7 +495,7 @@ class BotManager:
     
     def remove_bot(self, email):
         if email in self.bots:
-            self.bots[email].stop()
+            self.bots[email].disconnect()
             del self.bots[email]
 
 # Global instance manager
