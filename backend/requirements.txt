@@ -7,3 +7,4 @@ numpy
 requests
 TA-Lib
 exponent_server_sdk
+firebase-admin

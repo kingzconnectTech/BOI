@@ -1,15 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
-// TODO: Replace the following with your app's Firebase project configuration
-// You can find these in the Firebase Console -> Project Settings -> General -> Your Apps
+// Configuration from your Service Account "boi-e8449"
+// NOTE: You must provide the "apiKey" from Firebase Console -> Project Settings -> General
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY_HERE",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "your-sender-id",
-  appId: "your-app-id"
+  apiKey: "AIzaSyAnqL1H6jozpwB-ykhfYVQe2Ne3Sr_a2O4", 
+   authDomain: "boi-e8449.firebaseapp.com",
+  projectId: "boi-e8449",
+  storageBucket: "boi-e8449.firebasestorage.app",
+  messagingSenderId: "705703904910", 
+  appId: "1:705703904910:web:cd0933cd2c8f825a2babdf" 
 };
 
 const app = initializeApp(firebaseConfig);

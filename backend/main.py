@@ -7,6 +7,17 @@ import threading
 import time
 import requests
 from bot_service import bot_manager
+import firebase_admin
+from firebase_admin import credentials
+
+# Initialize Firebase Admin
+if not firebase_admin._apps:
+    try:
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin initialized successfully")
+    except Exception as e:
+        print(f"Warning: Firebase Admin initialization failed: {e}")
 
 app = FastAPI()
 

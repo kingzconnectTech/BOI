@@ -6,6 +6,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { auth } from './firebaseConfig';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // Backend URL
 const API_URL = 'https://boi-lgdy.onrender.com'; 
@@ -20,9 +22,16 @@ Notifications.setNotificationHandler({
 });
 
 export default function App() {
-  const [page, setPage] = useState('login'); // 'login' or 'dashboard'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // Auth State
+  const [user, setUser] = useState(null);
+  const [firebaseEmail, setFirebaseEmail] = useState('');
+  const [firebasePassword, setFirebasePassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+
+  // App State
+  const [page, setPage] = useState('bot_connect'); // 'bot_connect' or 'dashboard'
+  const [email, setEmail] = useState(''); // IQ Option Email
+  const [password, setPassword] = useState(''); // IQ Option Password
   const [mode, setMode] = useState('PRACTICE'); // PRACTICE or REAL
   const [amount, setAmount] = useState('1');
   const [duration, setDuration] = useState('1');
@@ -40,12 +49,25 @@ export default function App() {
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
     checkBackend();
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (!u) {
+        // Reset bot state if user logs out
+        setPage('bot_connect');
+        setIsRunning(false);
+        setLogs([]);
+        setEmail('');
+        setPassword('');
+      }
+    });
+    return unsubscribe;
   }, []);
 
   // Poll for logs and stats when dashboard is active
   useEffect(() => {
     let interval;
-    if (page === 'dashboard') {
+    if (user && page === 'dashboard') {
       interval = setInterval(async () => {
         try {
           if (!email) return;
@@ -68,7 +90,7 @@ export default function App() {
       }, 2000);
     }
     return () => clearInterval(interval);
-  }, [page, email]);
+  }, [page, email, user]);
 
   const addLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -86,14 +108,50 @@ export default function App() {
     }
   };
 
-  const handleLogin = async () => {
-    if (!email || !password) {
+  // Firebase Handlers
+  const handleFirebaseLogin = async () => {
+    if (!firebaseEmail || !firebasePassword) {
       alert('Please enter email and password');
+      return;
+    }
+    try {
+      await signInWithEmailAndPassword(auth, firebaseEmail, firebasePassword);
+    } catch (error) {
+      alert(`Login Failed: ${error.message}`);
+    }
+  };
+
+  const handleFirebaseRegister = async () => {
+    if (!firebaseEmail || !firebasePassword) {
+      alert('Please enter email and password');
+      return;
+    }
+    try {
+      await createUserWithEmailAndPassword(auth, firebaseEmail, firebasePassword);
+    } catch (error) {
+      alert(`Registration Failed: ${error.message}`);
+    }
+  };
+
+  const handleAppLogout = async () => {
+    try {
+        if (isRunning) {
+            await handleStop();
+        }
+        await signOut(auth);
+    } catch (error) {
+        alert(error.message);
+    }
+  };
+
+  // Bot Handlers
+  const handleBotConnect = async () => {
+    if (!email || !password) {
+      alert('Please enter IQ Option email and password');
       return;
     }
     
     // We start the bot immediately upon login to verify credentials
-    // Note: This connects the bot but doesn't necessarily start trading unless autoTrading is true
     await startBot();
   };
 
@@ -121,7 +179,7 @@ export default function App() {
     } catch (error) {
       setIsRunning(false);
       const errorMsg = error.response?.data?.detail || error.message;
-      alert(`Login/Start Failed: ${errorMsg}`);
+      alert(`Connect/Start Failed: ${errorMsg}`);
     }
   };
 
@@ -138,9 +196,9 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleBotDisconnect = () => {
       handleStop();
-      setPage('login');
+      setPage('bot_connect');
       setLogs([]);
       setStats({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
       setEmail('');
@@ -188,10 +246,61 @@ export default function App() {
     return token;
   }
 
-  const renderLogin = () => (
+  const renderAuth = () => (
+    <View style={styles.loginContainer}>
+        <Text style={styles.loginTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
+        <Text style={styles.loginSubtitle}>{isRegistering ? 'Create Account' : 'Welcome Back'}</Text>
+        
+        <View style={styles.loginCard}>
+           <View style={styles.inputContainer}>
+              <MaterialCommunityIcons name="email-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Firebase Email"
+                placeholderTextColor="#64748b"
+                value={firebaseEmail}
+                onChangeText={setFirebaseEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
+            <View style={styles.inputContainer}>
+              <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Firebase Password"
+                placeholderTextColor="#64748b"
+                value={firebasePassword}
+                onChangeText={setFirebasePassword}
+                secureTextEntry
+              />
+            </View>
+
+            <TouchableOpacity style={styles.loginButton} onPress={isRegistering ? handleFirebaseRegister : handleFirebaseLogin}>
+                <Text style={styles.loginButtonText}>{isRegistering ? 'REGISTER' : 'LOGIN'}</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={{marginTop: 20}} onPress={() => setIsRegistering(!isRegistering)}>
+                <Text style={{color: '#3b82f6', textAlign: 'center', fontWeight: '600'}}>
+                    {isRegistering ? 'Already have an account? Login' : 'New here? Create Account'}
+                </Text>
+            </TouchableOpacity>
+        </View>
+        <Text style={styles.backendStatus}>Server: {backendStatus}</Text>
+    </View>
+  );
+
+  const renderBotConnect = () => (
       <View style={styles.loginContainer}>
-          <Text style={styles.loginTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
-          <Text style={styles.loginSubtitle}>Professional Trading Automation</Text>
+          <View style={styles.authHeader}>
+             <Text style={styles.authEmail}>{user?.email}</Text>
+             <TouchableOpacity onPress={handleAppLogout}>
+                 <Text style={{color: '#ef4444', fontWeight: 'bold'}}>Sign Out</Text>
+             </TouchableOpacity>
+          </View>
+
+          <Text style={styles.loginTitle}>CONNECT<Text style={styles.headerTitleAccent}>BOT</Text></Text>
+          <Text style={styles.loginSubtitle}>Enter IQ Option Credentials</Text>
           
           <View style={styles.loginCard}>
              <View style={styles.inputContainer}>
@@ -210,7 +319,7 @@ export default function App() {
                 <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Password"
+                  placeholder="IQ Option Password"
                   placeholderTextColor="#64748b"
                   value={password}
                   onChangeText={setPassword}
@@ -233,11 +342,10 @@ export default function App() {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-                  <Text style={styles.loginButtonText}>LOGIN & CONNECT</Text>
+              <TouchableOpacity style={styles.loginButton} onPress={handleBotConnect}>
+                  <Text style={styles.loginButtonText}>CONNECT & START</Text>
               </TouchableOpacity>
           </View>
-          <Text style={styles.backendStatus}>Server: {backendStatus}</Text>
       </View>
   );
 
@@ -247,11 +355,16 @@ export default function App() {
         <View style={styles.dashboardHeader}>
              <View>
                 <Text style={styles.headerTitle}>DASHBOARD</Text>
-                <Text style={styles.headerSubtitle}>{email}</Text>
+                <Text style={styles.headerSubtitle}>{email} ({mode})</Text>
              </View>
-             <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                 <MaterialCommunityIcons name="logout" size={20} color="#ef4444" />
-             </TouchableOpacity>
+             <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                 <TouchableOpacity onPress={handleBotDisconnect} style={[styles.logoutButton, {marginRight: 10}]}>
+                     <MaterialCommunityIcons name="power" size={20} color="#f59e0b" />
+                 </TouchableOpacity>
+                 <TouchableOpacity onPress={handleAppLogout} style={styles.logoutButton}>
+                     <MaterialCommunityIcons name="logout" size={20} color="#ef4444" />
+                 </TouchableOpacity>
+             </View>
         </View>
         
         {/* Stats Dashboard */}
@@ -412,7 +525,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" backgroundColor="#0f172a" />
-      {page === 'login' ? renderLogin() : renderDashboard()}
+      {!user ? renderAuth() : (page === 'bot_connect' ? renderBotConnect() : renderDashboard())}
     </SafeAreaView>
   );
 }
@@ -471,6 +584,19 @@ const styles = StyleSheet.create({
   backendStatus: {
       marginTop: 20,
       color: '#475569',
+      fontSize: 12,
+  },
+  authHeader: {
+      position: 'absolute',
+      top: 20,
+      right: 20,
+      left: 20,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+  },
+  authEmail: {
+      color: '#94a3b8',
       fontSize: 12,
   },
   dashboardHeader: {
@@ -667,23 +793,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
   },
 
-  // Settings Row
+  // Settings
   settingRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
   },
   settingLabel: {
     color: '#e2e8f0',
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
   },
   settingSubLabel: {
     color: '#64748b',
@@ -693,87 +818,83 @@ const styles = StyleSheet.create({
   smallInput: {
     backgroundColor: '#0f172a',
     color: '#fff',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
+    padding: 10,
+    borderRadius: 8,
+    width: 60,
+    textAlign: 'center',
     borderWidth: 1,
     borderColor: '#334155',
-    textAlign: 'center',
-    width: 60,
   },
 
-  // Buttons
+  // Main Button
   mainButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     padding: 18,
     borderRadius: 16,
-    marginBottom: 24,
-    shadowColor: '#3b82f6',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 6,
+    marginBottom: 24,
   },
   startButton: {
-    backgroundColor: '#2563eb', // Blue 600
+    backgroundColor: '#3b82f6', // Blue
   },
   stopButton: {
-    backgroundColor: '#dc2626', // Red 600
-    shadowColor: '#dc2626',
+    backgroundColor: '#ef4444', // Red
   },
   mainButtonText: {
     color: '#fff',
+    fontWeight: '800',
     fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 10,
     letterSpacing: 1,
+    marginLeft: 8,
   },
 
   // Logs
   logsSection: {
-    backgroundColor: '#000',
-    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: '#334155',
-    overflow: 'hidden',
+    height: 300,
   },
   logsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#1e293b',
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    marginBottom: 12,
   },
   logsTitle: {
-    color: '#94a3b8',
-    fontSize: 11,
+    color: '#64748b',
+    fontSize: 12,
     fontWeight: '700',
     marginLeft: 8,
+    letterSpacing: 1,
   },
   logsConsole: {
-    height: 180,
-    padding: 12,
-  },
-  logLine: {
-    marginBottom: 4,
-  },
-  logTimestamp: {
-    color: '#64748b',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
-  },
-  logContent: {
-    color: '#4ade80', // Green 400
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
+    flex: 1,
   },
   logPlaceholder: {
     color: '#334155',
     fontStyle: 'italic',
     textAlign: 'center',
-    marginTop: 60,
-  }
+    marginTop: 40,
+  },
+  logLine: {
+    marginBottom: 6,
+    fontSize: 12,
+  },
+  logTimestamp: {
+    color: '#64748b',
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    marginRight: 8,
+  },
+  logContent: {
+    color: '#cbd5e1',
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
 });
