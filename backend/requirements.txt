@@ -6,3 +6,4 @@ pandas
 numpy
 requests
 TA-Lib
+exponent_server_sdk

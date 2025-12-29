@@ -3,10 +3,21 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platfo
 import { StatusBar } from 'expo-status-bar';
 import axios from 'axios';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 // Backend URL
 const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function App() {
   const [email, setEmail] = useState('');
@@ -23,8 +34,10 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('Checking...');
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [expoPushToken, setExpoPushToken] = useState('');
 
   useEffect(() => {
+    registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
     checkBackend();
   }, []);
 
@@ -91,7 +104,8 @@ export default function App() {
         take_profit: parseFloat(takeProfit) || 0,
         max_consecutive_losses: parseInt(maxConsecutiveLosses) || 0,
         max_trades: parseInt(maxTrades) || 0,
-        auto_trading: autoTrading
+        auto_trading: autoTrading,
+        push_token: expoPushToken // Send push token
       });
       
       if (response.data.status === 'started') {
@@ -117,6 +131,53 @@ export default function App() {
       addLog(`Error stopping bot: ${error.message}`);
     }
   };
+
+  async function registerForPushNotificationsAsync() {
+    let token;
+  
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      });
+    }
+  
+    if (Device.isDevice) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      if (finalStatus !== 'granted') {
+        alert('Failed to get push token for push notification!');
+        return;
+      }
+      // Learn more about projectId:
+      // https://docs.expo.dev/push-notifications/push-notifications-setup/#configure-projectid
+      // For bare workflow:
+      // token = (await Notifications.getExpoPushTokenAsync({ projectId: 'YOUR_PROJECT_ID' })).data;
+      // For managed workflow (like this):
+      try {
+        const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+        if (!projectId) {
+           // Fallback if projectId not found (development)
+           token = (await Notifications.getExpoPushTokenAsync()).data;
+        } else {
+           token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        }
+      } catch (e) {
+         token = (await Notifications.getExpoPushTokenAsync()).data;
+      }
+      console.log("Push Token:", token);
+    } else {
+      alert('Must use physical device for Push Notifications');
+    }
+  
+    return token;
+  }
 
   return (
     <SafeAreaView style={styles.container}>

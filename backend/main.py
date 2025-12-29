@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import os
+import threading
+import time
+import requests
 from bot_service import bot_instance
 
 app = FastAPI()
@@ -16,6 +19,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Keep-Alive Mechanism for Render Free Tier
+def keep_alive():
+    url = "https://boi-lgdy.onrender.com"
+    while True:
+        try:
+            time.sleep(600) # Ping every 10 minutes
+            print(f"Pinging {url} to keep alive...")
+            requests.get(url)
+        except Exception as e:
+            print(f"Keep-alive ping failed: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the keep-alive thread
+    threading.Thread(target=keep_alive, daemon=True).start()
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -27,6 +46,7 @@ class LoginRequest(BaseModel):
     max_consecutive_losses: int = 0
     max_trades: int = 0
     auto_trading: bool = True
+    push_token: str = None # Added for Push Notifications
 
 @app.get("/")
 def read_root():
@@ -46,6 +66,10 @@ def start_bot(login_data: LoginRequest):
         login_data.max_trades,
         login_data.auto_trading
     )
+    
+    # Set Push Token
+    if login_data.push_token:
+        bot_instance.set_push_token(login_data.push_token)
     
     success, message = bot_instance.connect(login_data.email, login_data.password, login_data.mode)
     if not success:

@@ -8,6 +8,7 @@ import traceback
 import talib
 import numpy as np
 from datetime import datetime, timedelta
+from exponent_server_sdk import PushClient, PushMessage
 
 class IQBot:
     def __init__(self):
@@ -28,6 +29,7 @@ class IQBot:
         self.max_consecutive_losses = 0
         self.max_trades = 0 # 0 means unlimited
         self.auto_trading = True
+        self.push_token = None # Expo Push Token
         
         self.initial_balance = 0
         self.total_profit = 0
@@ -45,6 +47,23 @@ class IQBot:
         self.max_consecutive_losses = max_consecutive_losses
         self.max_trades = max_trades
         self.auto_trading = auto_trading
+        
+    def set_push_token(self, token):
+        self.push_token = token
+        self.add_log(f"Push token set: {token[:10]}...")
+
+    def send_push(self, title, body):
+        if not self.push_token:
+            return
+        try:
+            response = PushClient().publish(
+                PushMessage(to=self.push_token,
+                            title=title,
+                            body=body)
+            )
+        except Exception as e:
+            print(f"Push notification failed: {e}")
+
     def reset_stats(self):
         self.total_profit = 0
         self.wins = 0
@@ -382,13 +401,18 @@ class IQBot:
                 if profit > 0:
                     self.wins += 1
                     self.current_consecutive_losses = 0
-                    self.add_log(f"WIN: +${profit:.2f}")
+                    msg = f"WIN: +${profit:.2f}"
+                    self.add_log(msg)
+                    self.send_push("Trade Won 💰", f"{self.currency} {profit:.2f}")
                 elif profit < 0:
                     self.losses += 1
                     self.current_consecutive_losses += 1
-                    self.add_log(f"LOSS: ${profit:.2f}")
+                    msg = f"LOSS: ${profit:.2f}"
+                    self.add_log(msg)
+                    self.send_push("Trade Lost 🔻", f"{self.currency} {profit:.2f}")
                 else:
-                    self.add_log(f"TIE: $0.00")
+                    msg = f"TIE: $0.00"
+                    self.add_log(msg)
                     
                 self.total_profit += profit
                 self.trades_taken += 1
@@ -397,9 +421,11 @@ class IQBot:
                 # Check limits immediately after result
                 if self.stop_loss > 0 and self.total_profit <= -self.stop_loss:
                      self.add_log(f"Stop Loss reached (-${self.stop_loss}). Stopping bot.")
+                     self.send_push("Bot Stopped 🛑", f"Stop Loss reached (-${self.stop_loss})")
                      self.stop()
                 elif self.take_profit > 0 and self.total_profit >= self.take_profit:
                      self.add_log(f"Take Profit reached (+${self.take_profit}). Stopping bot.")
+                     self.send_push("Bot Stopped 🛑", f"Take Profit reached (+${self.take_profit})")
                      self.stop()
                 else:
                     # Enforce Strategy Rule: 2 consecutive losses -> STOP (Default if not set)
@@ -407,9 +433,11 @@ class IQBot:
                     
                     if self.current_consecutive_losses >= limit_consecutive:
                         self.add_log(f"Max consecutive losses reached ({self.current_consecutive_losses}). Stopping bot.")
+                        self.send_push("Bot Stopped 🛑", f"Max consecutive losses reached ({self.current_consecutive_losses})")
                         self.stop()
                     elif self.max_trades > 0 and self.trades_taken >= self.max_trades:
                         self.add_log(f"Max trades limit reached ({self.trades_taken}). Stopping bot.")
+                        self.send_push("Bot Stopped 🛑", f"Max trades limit reached")
                         self.stop()
 
             else:
