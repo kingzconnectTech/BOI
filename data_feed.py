@@ -28,6 +28,13 @@ class DataFeed:
 
             logger.info(f"Connecting to IQ Option as {self.email}...")
             try:
+                # Close existing API connection if it exists to prevent multiple active sockets
+                if self.api:
+                    try:
+                        self.api.api.close()
+                    except:
+                        pass
+                
                 self.api = IQ_Option(self.email, self.password)
                 check, reason = self.api.connect()
                 
