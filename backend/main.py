@@ -79,6 +79,8 @@ def connect_bot(data: ConnectRequest):
     bot = bot_manager.get_bot(data.email)
     success, message = bot.connect(data.email, data.password, data.mode)
     if not success:
+        # If connection fails, remove the bot to prevent zombie instances
+        bot_manager.remove_bot(data.email)
         raise HTTPException(status_code=400, detail=message)
     
     return {"status": "connected", "message": message, "data": bot.get_status()}

@@ -100,6 +100,10 @@ class IQBot:
         self.password = password
         self.api = IQ_Option(email, password)
         
+        # Clear logs and stats on new connection to prevent data leak
+        self.clear_logs() 
+        self.reset_stats()
+        
         # Attempt connection
         check, reason = self.api.connect()
         
@@ -515,12 +519,14 @@ class BotManager:
         self.lock = threading.Lock()
     
     def get_bot(self, email):
+        email = email.lower().strip()
         with self.lock:
             if email not in self.bots:
                 self.bots[email] = IQBot()
             return self.bots[email]
     
     def remove_bot(self, email):
+        email = email.lower().strip()
         with self.lock:
             if email in self.bots:
                 self.bots[email].disconnect()
