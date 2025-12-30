@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import axios from 'axios';
@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { useKeepAwake } from 'expo-keep-awake';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
@@ -23,6 +24,8 @@ Notifications.setNotificationHandler({
 });
 
 export default function App() {
+  useKeepAwake(); // Keep screen on while app is open
+
   // Auth State
   const [user, setUser] = useState(null);
   const [firebaseEmail, setFirebaseEmail] = useState('');
@@ -41,11 +44,14 @@ export default function App() {
   const [maxConsecutiveLosses, setMaxConsecutiveLosses] = useState('2');
   const [maxTrades, setMaxTrades] = useState('0'); // 0 = unlimited
   const [autoTrading, setAutoTrading] = useState(true);
+  const [currency, setCurrency] = useState('$'); // Default to $
   const [stats, setStats] = useState({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
   const [backendStatus, setBackendStatus] = useState('Checking...');
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [expoPushToken, setExpoPushToken] = useState('');
+  const [nextTradingTime, setNextTradingTime] = useState(null); // New state for market status
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
@@ -84,6 +90,20 @@ export default function App() {
           if (statusResponse.data) {
             setStats(statusResponse.data.stats);
             setIsRunning(statusResponse.data.running);
+            if (statusResponse.data.currency) {
+                setCurrency(statusResponse.data.currency);
+            }
+            if (statusResponse.data.min_amount) {
+                // Only update if amount is default '1' or empty, to avoid overwriting user input
+                if (amount === '1' || amount === '') {
+                     setAmount(statusResponse.data.min_amount.toString());
+                }
+            }
+            if (statusResponse.data.next_trading_time) {
+                 setNextTradingTime(statusResponse.data.next_trading_time);
+            } else {
+                 setNextTradingTime(null);
+            }
           }
         } catch (error) {
           console.log("Error fetching data:", error.message);
@@ -115,10 +135,13 @@ export default function App() {
       alert('Please enter email and password');
       return;
     }
+    setIsLoading(true);
     try {
       await signInWithEmailAndPassword(auth, firebaseEmail, firebasePassword);
     } catch (error) {
       alert(`Login Failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -127,10 +150,13 @@ export default function App() {
       alert('Please enter email and password');
       return;
     }
+    setIsLoading(true);
     try {
       await createUserWithEmailAndPassword(auth, firebaseEmail, firebasePassword);
     } catch (error) {
       alert(`Registration Failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -157,6 +183,7 @@ export default function App() {
       return;
     }
     
+    setIsLoading(true);
     try {
         const response = await axios.post(`${API_URL}/connect`, {
             email,
@@ -171,10 +198,18 @@ export default function App() {
             if (response.data.data && response.data.data.stats) {
                  setStats(response.data.data.stats);
             }
+            if (response.data.data && response.data.data.currency) {
+                 setCurrency(response.data.data.currency);
+            }
+            if (response.data.data && response.data.data.min_amount) {
+                 setAmount(response.data.data.min_amount.toString());
+            }
         }
     } catch (error) {
         const errorMsg = error.response?.data?.detail || error.message;
         alert(`Connection Failed: ${errorMsg}`);
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -224,6 +259,7 @@ export default function App() {
       setPage('bot_connect');
       setLogs([]);
       setStats({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
+      setCurrency('$');
       setEmail('');
       setPassword('');
   };
@@ -269,9 +305,45 @@ export default function App() {
     return token;
   }
 
+  const handleScheduleNotification = async () => {
+    if (!nextTradingTime) return;
+    
+    // Parse time string (e.g., "14:00")
+    const timeParts = nextTradingTime.split(' ')[0].split(':');
+    const hour = parseInt(timeParts[0]);
+    const minute = parseInt(timeParts[1]);
+    
+    const now = new Date();
+    const trigger = new Date();
+    trigger.setHours(hour);
+    trigger.setMinutes(minute);
+    trigger.setSeconds(0);
+    
+    // If time is in past, assume tomorrow (though backend handles "Tomorrow" label, simple check here)
+    if (trigger <= now) {
+        trigger.setDate(trigger.getDate() + 1);
+    }
+    
+    // Schedule notification 5 mins before
+    trigger.setMinutes(trigger.getMinutes() - 5);
+
+    try {
+        await Notifications.scheduleNotificationAsync({
+            content: {
+                title: "Trading Session Starting Soon!",
+                body: `Market opens at ${nextTradingTime}. Get ready!`,
+            },
+            trigger: trigger,
+        });
+        alert(`Reminder set for ${trigger.toLocaleTimeString()}!`);
+    } catch (e) {
+        alert("Failed to schedule reminder");
+    }
+  };
+
   const renderAuth = () => (
     <View style={styles.loginContainer}>
-        <Text style={styles.loginTitle}>QUANTUM<Text style={styles.headerTitleAccent}>BOT</Text></Text>
+        <Text style={styles.loginTitle}>BOI</Text>
         <Text style={styles.loginSubtitle}>{isRegistering ? 'Create Account' : 'Welcome Back'}</Text>
         
         <View style={styles.loginCard}>
@@ -279,7 +351,7 @@ export default function App() {
               <MaterialCommunityIcons name="email-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Firebase Email"
+                placeholder="Email Address"
                 placeholderTextColor="#64748b"
                 value={firebaseEmail}
                 onChangeText={setFirebaseEmail}
@@ -291,7 +363,7 @@ export default function App() {
               <MaterialCommunityIcons name="lock-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Firebase Password"
+                placeholder="Password"
                 placeholderTextColor="#64748b"
                 value={firebasePassword}
                 onChangeText={setFirebasePassword}
@@ -299,8 +371,12 @@ export default function App() {
               />
             </View>
 
-            <TouchableOpacity style={styles.loginButton} onPress={isRegistering ? handleFirebaseRegister : handleFirebaseLogin}>
-                <Text style={styles.loginButtonText}>{isRegistering ? 'REGISTER' : 'LOGIN'}</Text>
+            <TouchableOpacity style={styles.loginButton} onPress={isRegistering ? handleFirebaseRegister : handleFirebaseLogin} disabled={isLoading}>
+                {isLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <Text style={styles.loginButtonText}>{isRegistering ? 'REGISTER' : 'LOGIN'}</Text>
+                )}
             </TouchableOpacity>
             
             <TouchableOpacity style={{marginTop: 20}} onPress={() => setIsRegistering(!isRegistering)}>
@@ -365,8 +441,12 @@ export default function App() {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.loginButton} onPress={handleBotConnect}>
-                  <Text style={styles.loginButtonText}>CONNECT & START</Text>
+              <TouchableOpacity style={styles.loginButton} onPress={handleBotConnect} disabled={isLoading}>
+                  {isLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                      <Text style={styles.loginButtonText}>CONNECT & START</Text>
+                  )}
               </TouchableOpacity>
           </View>
       </View>
@@ -379,6 +459,7 @@ export default function App() {
              <View>
                 <Text style={styles.headerTitle}>DASHBOARD</Text>
                 <Text style={styles.headerSubtitle}>{email} ({mode})</Text>
+                <Text style={{color: '#64748b', fontSize: 10, marginTop: 2}}>Runs in background</Text>
              </View>
              <View style={{flexDirection: 'row', alignItems: 'center'}}>
                  <TouchableOpacity onPress={handleBotDisconnect} style={[styles.logoutButton, {marginRight: 10}]}>
@@ -390,13 +471,27 @@ export default function App() {
              </View>
         </View>
         
+        {/* Market Closed Warning */}
+        {nextTradingTime && (
+            <View style={styles.warningCard}>
+                <MaterialCommunityIcons name="clock-alert-outline" size={24} color="#fff" />
+                <View style={{flex: 1, marginLeft: 10}}>
+                    <Text style={styles.warningTitle}>Market Currently Closed</Text>
+                    <Text style={styles.warningText}>Next session starts at: {nextTradingTime}</Text>
+                </View>
+                <TouchableOpacity style={styles.reminderButton} onPress={handleScheduleNotification}>
+                    <MaterialCommunityIcons name="bell-ring" size={20} color="#fff" />
+                </TouchableOpacity>
+            </View>
+        )}
+        
         {/* Stats Dashboard */}
         <View style={styles.dashboardContainer}>
           <View style={styles.statCard}>
             <MaterialCommunityIcons name="finance" size={24} color="#10b981" />
             <Text style={styles.statLabel}>Profit</Text>
             <Text style={[styles.statValue, { color: stats.profit >= 0 ? '#10b981' : '#ef4444' }]}>
-              ${stats.profit}
+              {currency}{stats.profit}
             </Text>
           </View>
           <View style={styles.statCard}>
@@ -418,7 +513,7 @@ export default function App() {
           {/* Trading Settings Grid */}
           <View style={styles.gridContainer}>
             <View style={styles.gridItem}>
-              <Text style={styles.gridLabel}>Amount ($)</Text>
+              <Text style={styles.gridLabel}>Amount ({currency})</Text>
               <TextInput
                 style={styles.gridInput}
                 placeholder="1"
@@ -440,7 +535,7 @@ export default function App() {
               />
             </View>
             <View style={styles.gridItem}>
-              <Text style={styles.gridLabel}>Stop Loss ($)</Text>
+              <Text style={styles.gridLabel}>Stop Loss ({currency})</Text>
               <TextInput
                 style={styles.gridInput}
                 placeholder="10"
@@ -451,7 +546,7 @@ export default function App() {
               />
             </View>
             <View style={styles.gridItem}>
-              <Text style={styles.gridLabel}>Take Profit ($)</Text>
+              <Text style={styles.gridLabel}>Take Profit ({currency})</Text>
               <TextInput
                 style={styles.gridInput}
                 placeholder="20"
@@ -692,6 +787,35 @@ const styles = StyleSheet.create({
   },
   
   // Dashboard
+  warningCard: {
+    backgroundColor: '#f59e0b',
+    margin: 20,
+    marginBottom: 0,
+    padding: 15,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  warningTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  warningText: {
+    color: '#fff',
+    fontSize: 14,
+    opacity: 0.9,
+  },
+  reminderButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 8,
+    borderRadius: 8,
+  },
   dashboardContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',

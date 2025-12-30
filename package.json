@@ -18,6 +18,7 @@
     "expo-constants": "~18.0.12",
     "expo-dev-client": "~6.0.20",
     "expo-device": "~8.0.10",
+    "expo-keep-awake": "^15.0.8",
     "expo-notifications": "~0.32.15",
     "expo-status-bar": "~3.0.9",
     "firebase": "^12.7.0",

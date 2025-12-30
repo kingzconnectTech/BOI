@@ -13,7 +13,11 @@ from firebase_admin import credentials
 # Initialize Firebase Admin
 if not firebase_admin._apps:
     try:
-        cred = credentials.Certificate("serviceAccountKey.json")
+        # Construct absolute path to serviceAccountKey.json
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        service_account_path = os.path.join(base_dir, "serviceAccountKey.json")
+        
+        cred = credentials.Certificate(service_account_path)
         firebase_admin.initialize_app(cred)
         print("Firebase Admin initialized successfully")
     except Exception as e:
@@ -90,34 +94,38 @@ def connect_bot(data: ConnectRequest):
 
 @app.post("/start")
 def start_bot(login_data: LoginRequest):
-    # Use bot_manager to connect (handles locking and creation)
-    success, message = bot_manager.connect_bot(login_data.email, login_data.password, login_data.mode)
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
-    
-    bot = bot_manager.get_bot(login_data.email)
-    bot.clear_logs() # Clear previous logs
-    
-    # Set config
-    bot.set_config(
-        login_data.amount, 
-        login_data.duration, 
-        login_data.stop_loss, 
-        login_data.take_profit,
-        login_data.max_consecutive_losses,
-        login_data.max_trades,
-        login_data.auto_trading
-    )
-    
-    # Set Push Token
-    if login_data.push_token:
-        bot.set_push_token(login_data.push_token)
-    
-    # Start auto trading loop
-    bot.start_trading()
-    
-    status = bot.get_status()
-    return {"status": "started", "message": message, "data": status}
+    try:
+        # Use bot_manager to connect (handles locking and creation)
+        success, message = bot_manager.connect_bot(login_data.email, login_data.password, login_data.mode)
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        bot = bot_manager.get_bot(login_data.email)
+        bot.clear_logs() # Clear previous logs
+        
+        # Set config
+        bot.set_config(
+            login_data.amount, 
+            login_data.duration, 
+            login_data.stop_loss, 
+            login_data.take_profit,
+            login_data.max_consecutive_losses,
+            login_data.max_trades,
+            login_data.auto_trading
+        )
+        
+        # Set Push Token
+        if login_data.push_token:
+            bot.set_push_token(login_data.push_token)
+        
+        # Start auto trading loop
+        bot.start_trading()
+        
+        status = bot.get_status()
+        return {"status": "started", "message": message, "data": status}
+    except Exception as e:
+        print(f"Error starting bot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stop")
 def stop_bot(request: StopRequest):
