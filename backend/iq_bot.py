@@ -151,8 +151,21 @@ class IQBot:
             self.currency = self.api.get_currency()
 
     def start_trading(self):
+        # Force a fresh connection check
+        if not self.api or not self.connected:
+             self.add_log("Reconnecting before trading...")
+             check, reason = self.connect(self.email, self.password)
+             if not check:
+                 self.add_log(f"Auto-reconnect failed: {reason}")
+                 return
+
         self.is_running = True
-        threading.Thread(target=self._trading_loop, daemon=True).start()
+        # Ensure only one loop is running
+        if not hasattr(self, 'trading_thread') or not self.trading_thread.is_alive():
+             self.trading_thread = threading.Thread(target=self._trading_loop, daemon=True)
+             self.trading_thread.start()
+        else:
+             self.add_log("Trading loop already active.")
 
     def _trading_loop(self):
         while self.is_running and self.connected:

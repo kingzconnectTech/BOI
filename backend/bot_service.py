@@ -256,17 +256,9 @@ class BotManager:
         self._ensure_manager()
         email = email.lower().strip()
         
-        # ALWAYS clean up existing bot to ensure fresh state (Fixes "need to restart server" issue)
-        if email in self.bots:
-            print(f"[BotManager] Cleaning up existing bot for {email} before reconnection")
-            try:
-                self.bots[email].disconnect() # Terminate old process
-            except Exception as e:
-                print(f"[BotManager] Error disconnecting old bot: {e}")
-            del self.bots[email] # Remove from dict
-        
-        print(f"[BotManager] Creating NEW IsolatedBot for {email}")
-        self.bots[email] = IsolatedBot(self.mp_manager)
+        if email not in self.bots:
+            print(f"[BotManager] Creating NEW IsolatedBot for {email}")
+            self.bots[email] = IsolatedBot(self.mp_manager)
         
         return self.bots[email].connect(email, password, mode)
 
