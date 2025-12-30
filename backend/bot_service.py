@@ -105,6 +105,7 @@ class IQBot:
         with bot_manager.lock:
             # Create NEW instance
             self.api = IQ_Option(email, password)
+            print(f"[IQBot] Created API instance {id(self.api)} for {email}")
             
             # Clear logs and stats on new connection to prevent data leak
             self.clear_logs() 
@@ -555,7 +556,10 @@ class BotManager:
         email = email.lower().strip()
         with self.lock:
             if email not in self.bots:
+                print(f"[BotManager] Creating NEW bot for {email}")
                 self.bots[email] = IQBot()
+            else:
+                print(f"[BotManager] Returning EXISTING bot for {email}")
             return self.bots[email]
     
     def remove_bot(self, email):
