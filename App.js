@@ -12,7 +12,7 @@ import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // Backend URL
-const API_URL = 'https://boi-lgdy.onrender.com';
+const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({

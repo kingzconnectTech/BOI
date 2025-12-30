@@ -40,7 +40,6 @@ class IQBot:
         self.trades_taken = 0
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
-        self.next_trading_time = None # For frontend notification
 
     def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
         self.trade_amount = amount
@@ -151,21 +150,8 @@ class IQBot:
             self.currency = self.api.get_currency()
 
     def start_trading(self):
-        # Force a fresh connection check
-        if not self.api or not self.connected:
-             self.add_log("Reconnecting before trading...")
-             check, reason = self.connect(self.email, self.password)
-             if not check:
-                 self.add_log(f"Auto-reconnect failed: {reason}")
-                 return
-
         self.is_running = True
-        # Ensure only one loop is running
-        if not hasattr(self, 'trading_thread') or not self.trading_thread.is_alive():
-             self.trading_thread = threading.Thread(target=self._trading_loop, daemon=True)
-             self.trading_thread.start()
-        else:
-             self.add_log("Trading loop already active.")
+        threading.Thread(target=self._trading_loop, daemon=True).start()
 
     def _trading_loop(self):
         while self.is_running and self.connected:
@@ -231,13 +217,12 @@ class IQBot:
         if action:
             direction = action
             
-            # Expiry Rule: User defined duration
-            expiry_duration = self.trade_duration
+            # Expiry Rule: 2 min expiry
+            expiry_duration = 2 
             
-            # Money Management: Use user defined amount (removing hidden 2% cap)
-            # safe_max = max(1.0, self.balance * 0.02)
-            # actual_amount = min(self.trade_amount, safe_max)
-            actual_amount = self.trade_amount
+            # Money Management: Risk 1-2% per trade
+            safe_max = max(1.0, self.balance * 0.02)
+            actual_amount = min(self.trade_amount, safe_max)
             
             # Check Auto Trading
             if not self.auto_trading:

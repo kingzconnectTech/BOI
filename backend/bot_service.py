@@ -77,7 +77,7 @@ def run_bot_process(email, password, mode, shared_dict, command_queue):
             shared_dict['balance'] = bot.balance
             shared_dict['currency'] = bot.currency
             shared_dict['min_amount'] = bot.trade_amount
-            shared_dict['next_trading_time'] = getattr(bot, 'next_trading_time', None)
+            shared_dict['next_trading_time'] = bot.next_trading_time
             shared_dict['logs'] = bot.get_logs()
             
             win_rate = 0
