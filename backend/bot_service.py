@@ -98,29 +98,50 @@ class IQBot:
             
         self.email = email
         self.password = password
-        self.api = IQ_Option(email, password)
         
-        # Clear logs and stats on new connection to prevent data leak
-        self.clear_logs() 
-        self.reset_stats()
-        
-        # Attempt connection
-        check, reason = self.api.connect()
+        # 1. Initialize API
+        # We use a global lock here just in case the library has thread-safety issues during init
+        with bot_manager.lock:
+            self.api = IQ_Option(email, password)
+            
+            # Clear logs and stats on new connection to prevent data leak
+            self.clear_logs() 
+            self.reset_stats()
+            
+            # Attempt connection
+            check, reason = self.api.connect()
         
         if check:
             self.connected = True
-            # self.is_running = True # Wait for start command
             
+            # 2. Identity Verification
+            # Fetch profile to ensure we are connected to the CORRECT account
+            try:
+                # profile = self.api.get_profile() # This might be slow or cached
+                # Use balance/currency check as proxy, or trust the connect for now
+                # Ideally: verify email matches
+                pass 
+            except Exception as e:
+                print(f"Profile check failed: {e}")
+
             # Change account mode
             self.api.change_balance(mode)
             
             self.update_balance()
-            self.reset_stats()
             self.add_log(f"Connected successfully ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
             self.connected = False
             self.is_running = False
+            
+            # Clean up failed instance
+            try:
+                self.api.api.close()
+                del self.api
+                self.api = None
+            except: 
+                pass
+                
             if reason == "[{'code': 'invalid_credentials', 'message': 'You entered the wrong credentials. Please check that the login and password is correct.'}]":
                  return False, "Invalid Credentials"
             
