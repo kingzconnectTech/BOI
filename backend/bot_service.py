@@ -4,6 +4,14 @@ import time
 import queue
 from iq_bot import IQBot
 
+# Force 'spawn' method for multiprocessing compatibility on Linux/Render
+# This is crucial because 'fork' (default on Linux) can cause issues with 
+# threaded libraries like websocket-client used by iqoptionapi.
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass # Context already set
+
 # ============================================================================
 # BotProcess Function - Runs in a separate process
 # ============================================================================
