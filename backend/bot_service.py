@@ -87,6 +87,16 @@ class IQBot:
     def clear_logs(self):
         self.logs = []
 
+    def reset_stats(self):
+        self.total_profit = 0
+        self.wins = 0
+        self.losses = 0
+        self.trades_taken = 0
+        self.current_consecutive_losses = 0
+        self.logs = []
+        self.balance = 0
+        self.currency = ""
+
     def connect(self, email, password, mode="PRACTICE"):
         # Force cleanup before connecting to ensure no stale session
         if self.api:
@@ -97,6 +107,8 @@ class IQBot:
                 pass
             self.api = None
             
+        self.reset_stats() # FORCE RESET ALL STATS AND VARIABLES
+        
         self.email = email
         self.password = password
         
@@ -145,7 +157,9 @@ class IQBot:
                         self.disconnect() # This now also calls _clear_session_file
                         return False, "Session Error: Connected to wrong account. Please try again."
                 else:
-                    self.add_log("Warning: Could not verify connected email. Proceeding with caution.")
+                    self.add_log("Error: Could not verify connected email. Aborting connection for safety.")
+                    self.disconnect()
+                    return False, "Connection Error: Could not verify account identity. Please try again."
 
                 # Check balance to ensure it's fresh
                 self.api.change_balance(mode)
@@ -531,12 +545,28 @@ class IQBot:
     def _clear_session_file(self):
         """Attempts to remove session files created by iqoptionapi"""
         try:
-            # Common session file names
+            cwd = os.getcwd()
+            print(f"Clearing session files. CWD: {cwd}")
+            
+            # Potential locations for session.json
+            paths_to_check = [
+                cwd,
+                os.path.join(cwd, "backend"),
+                os.path.dirname(os.path.abspath(__file__)) # The directory where bot_service.py is
+            ]
+            
             files = ["session.json", "auth.json"]
-            for fname in files:
-                if os.path.exists(fname):
-                    os.remove(fname)
-                    print(f"Removed session file: {fname}")
+            
+            for path in paths_to_check:
+                for fname in files:
+                    full_path = os.path.join(path, fname)
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                            print(f"Removed session file: {full_path}")
+                        except Exception as e:
+                            print(f"Error removing {full_path}: {e}")
+                            
         except Exception as e:
             print(f"Error clearing session file: {e}")
 
@@ -587,8 +617,27 @@ class BotManager:
     def get_bot(self, email):
         email = email.lower().strip()
         with self.lock:
+            # Note: We do NOT reuse the existing bot object if the user is reconnecting.
+            # We want a fresh start. But if we just replace it, we might leave a thread running?
+            # The 'disconnect' logic should handle stopping threads.
             if email not in self.bots:
                 self.bots[email] = IQBot()
+            return self.bots[email]
+    
+    def force_new_bot(self, email):
+        """Destroys existing bot and creates a brand new instance"""
+        email = email.lower().strip()
+        with self.lock:
+            if email in self.bots:
+                print(f"Destroying old bot instance for {email}")
+                try:
+                    self.bots[email].disconnect() # Stop threads, close socket
+                except:
+                    pass
+                del self.bots[email]
+            
+            print(f"Creating fresh bot instance for {email}")
+            self.bots[email] = IQBot()
             return self.bots[email]
     
     def remove_bot(self, email):
