@@ -40,6 +40,7 @@ class IQBot:
         self.trades_taken = 0
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
+        self.next_trading_time = None # For frontend notification
 
     def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
         self.trade_amount = amount
