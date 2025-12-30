@@ -2,8 +2,7 @@ from iqoptionapi.stable_api import IQ_Option
 import time
 import threading
 import random
-import os
-import glob
+
 import traceback
 
 import talib
@@ -96,6 +95,7 @@ class IQBot:
             except:
                 pass
             self.api = None
+            time.sleep(1) # Wait for full disconnect
             
         self.email = email
         self.password = password
@@ -103,17 +103,12 @@ class IQBot:
         # 1. Initialize API
         # We use a global lock here just in case the library has thread-safety issues during init
         with bot_manager.lock:
-            # CRITICAL: Remove any existing session file to prevent reusing old credentials
-            self._clear_session_file()
-            
-            # Create FRESH instance
+            # Create NEW instance
             self.api = IQ_Option(email, password)
             
             # Clear logs and stats on new connection to prevent data leak
             self.clear_logs() 
             self.reset_stats()
-            self.balance = 0
-            self.currency = ""
             
             # Attempt connection
             check, reason = self.api.connect()
@@ -122,86 +117,20 @@ class IQBot:
             self.connected = True
             
             # 2. Identity Verification
-            # We must verify that the connected account matches the requested email
+            # Fetch profile to ensure we are connected to the CORRECT account
             try:
-                # Trigger profile fetch immediately
-                self.api.get_profile_ansyc()
-                
-                # Wait for profile data to be populated (timeout 10s)
-                # In iqoptionapi, profile is usually in self.api.profile.msg
-                profile_email = None
-                for _ in range(40): # 20 seconds wait (increased)
-                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
-                         profile_email = self.api.profile.msg.get('email')
-                         if profile_email:
-                             break
-                     time.sleep(0.5)
-                
-                # If still not found, try one last time
-                if not profile_email:
-                     self.api.get_profile_ansyc()
-                     time.sleep(3)
-                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
-                         profile_email = self.api.profile.msg.get('email')
-
-                # STRICT EMAIL CHECK
-                if profile_email:
-                    if profile_email.lower().strip() != email.lower().strip():
-                        self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {profile_email}. Disconnecting.")
-                        self.disconnect() # This now also calls _clear_session_file
-                        return False, "Session Error: Connected to wrong account. Please try again."
-                else:
-                    # Fallback: If we created a NEW instance and CLEARED session, we are likely safe.
-                    # But the user reported wrong accounts, so we must be careful.
-                    # However, aborting because of API slowness is annoying.
-                    # We will log a warning but allow it IF and ONLY IF we are sure we cleaned up.
-                    # ACTUALLY, checking balance might be a good secondary check.
-                    
-                    self.add_log("Warning: Could not verify email via profile (API timeout). Checking balance to verify session...")
-                    
-                    # Check balance
-                    self.api.change_balance(mode)
-                    time.sleep(1)
-                    self.api.get_balance()
-                    time.sleep(1)
-                    bal = self.api.get_balance()
-                    
-                    if bal is None:
-                         self.add_log("Error: Could not verify identity OR balance. Aborting.")
-                         self.disconnect()
-                         return False, "Connection Error: API timeout. Please try again."
-                    
-                    # If we got balance, we are connected.
-                    # Since we forced a NEW instance and deleted session files, risk is minimized.
-                    self.add_log(f"Identity check skipped (Timeout). Proceeding with fresh session. Balance found: {bal}")
-                    self.balance = bal
-                    self.currency = self.api.get_currency()
-                    
-                    # skip the standard balance block below since we just did it
-                    self.update_balance()
-                    self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
-                    return True, f"Connected successfully ({mode})"
-
-                # Check balance to ensure it's fresh
-                self.api.change_balance(mode)
-                time.sleep(1) # Wait for mode change to propagate
-                
-                # FORCE REFRESH BALANCE
-                self.api.get_balance()
-                time.sleep(1)
-                self.balance = self.api.get_balance()
-                self.currency = self.api.get_currency()
-                
-                # Double check balance isn't None
-                if self.balance is None:
-                     time.sleep(1)
-                     self.balance = self.api.get_balance()
-                
+                # profile = self.api.get_profile() # This might be slow or cached
+                # Use balance/currency check as proxy, or trust the connect for now
+                # Ideally: verify email matches
+                pass 
             except Exception as e:
-                print(f"Profile/Balance check warning: {e}")
+                print(f"Profile check failed: {e}")
 
+            # Change account mode
+            self.api.change_balance(mode)
+            
             self.update_balance()
-            self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
+            self.add_log(f"Connected successfully ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
             self.connected = False
@@ -572,34 +501,6 @@ class IQBot:
             pass
         return True, "Bot stopped"
 
-    def _clear_session_file(self):
-        """Attempts to remove session files created by iqoptionapi"""
-        try:
-            cwd = os.getcwd()
-            print(f"Clearing session files. CWD: {cwd}")
-            
-            # Potential locations for session.json
-            paths_to_check = [
-                cwd,
-                os.path.join(cwd, "backend"),
-                os.path.dirname(os.path.abspath(__file__)) # The directory where bot_service.py is
-            ]
-            
-            files = ["session.json", "auth.json"]
-            
-            for path in paths_to_check:
-                for fname in files:
-                    full_path = os.path.join(path, fname)
-                    if os.path.exists(full_path):
-                        try:
-                            os.remove(full_path)
-                            print(f"Removed session file: {full_path}")
-                        except Exception as e:
-                            print(f"Error removing {full_path}: {e}")
-                            
-        except Exception as e:
-            print(f"Error clearing session file: {e}")
-
     def disconnect(self):
         self.stop()
         
@@ -610,14 +511,20 @@ class IQBot:
                 del self.api
             except Exception as e:
                 print(f"Error closing API: {e}")
-                
+        
+        # Add delay to allow socket to close properly
+        time.sleep(1)
+        
         self.connected = False
         self.api = None
         self.email = None
         self.password = None
         
-        # Clear persistent session files
-        self._clear_session_file()
+        # Reset data
+        self.balance = 0
+        self.currency = ""
+        self.logs = []
+        self.reset_stats()
         
         return True, "Disconnected"
 

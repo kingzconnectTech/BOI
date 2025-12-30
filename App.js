@@ -219,17 +219,8 @@ export default function App() {
     }
   };
 
-  const handleBotDisconnect = async () => {
-      try {
-          // Stop first
-          await handleStop();
-          
-          if (email) {
-              await axios.post(`${API_URL}/disconnect`, { email });
-          }
-      } catch (error) {
-          console.log("Disconnect error:", error);
-      }
+  const handleBotDisconnect = () => {
+      handleStop();
       setPage('bot_connect');
       setLogs([]);
       setStats({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
