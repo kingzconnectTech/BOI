@@ -82,7 +82,16 @@ export default function App() {
           // Get Logs
           const logsResponse = await axios.get(`${API_URL}/logs?email=${email}`);
           if (logsResponse.data.logs && logsResponse.data.logs.length > 0) {
+            // Only update if we have logs to avoid clearing "Starting bot..." message prematurely
+            // Or better: Append backend logs to local logs, avoiding duplicates?
+            // Simple approach: Backend logs are authoritative. 
+            // If backend logs are empty, do nothing (keep local logs).
             setLogs(logsResponse.data.logs.reverse());
+          } else if (logsResponse.data.logs && logsResponse.data.logs.length === 0) {
+             // If backend explicitly returns empty logs, do we clear local?
+             // Only if we just started (to clear old session logs).
+             // But if we just added "Starting bot...", we don't want to clear it.
+             // So, do nothing here.
           }
           
           // Get Stats (Status)
@@ -184,15 +193,19 @@ export default function App() {
     }
     
     setIsLoading(true);
+    // Switch to dashboard immediately to show logs
+    setPage('dashboard');
+    addLog('Connecting to IQ Option...'); 
+
     try {
         const response = await axios.post(`${API_URL}/connect`, {
             email,
             password,
             mode
-        });
+        }, { timeout: 60000 }); // 60s timeout
         
         if (response.data.status === 'connected') {
-            setPage('dashboard');
+            // setPage('dashboard'); // Already there
             setIsRunning(false);
             addLog(`Success: ${response.data.message}`);
             if (response.data.data && response.data.data.stats) {
@@ -206,6 +219,11 @@ export default function App() {
             }
         }
     } catch (error) {
+        // Go back to connect page on failure
+        // setPage('bot_connect'); // Optional: stay on dashboard to see logs?
+        // Let's stay on dashboard but allow retry via logout or back button if we had one.
+        // Actually, if we fail, we should probably go back so they can fix credentials.
+        setPage('bot_connect');
         const errorMsg = error.response?.data?.detail || error.message;
         alert(`Connection Failed: ${errorMsg}`);
     } finally {
@@ -215,6 +233,7 @@ export default function App() {
 
   const startBot = async () => {
     try {
+      addLog('Starting bot...'); // Immediate feedback
       const response = await axios.post(`${API_URL}/start`, {
         email: email,
         password: password,
@@ -227,7 +246,7 @@ export default function App() {
         max_trades: parseInt(maxTrades) || 0,
         auto_trading: autoTrading,
         push_token: expoPushToken 
-      });
+      }, { timeout: 60000 }); // 60s timeout
       
       if (response.data.status === 'started') {
         setPage('dashboard');
@@ -238,6 +257,7 @@ export default function App() {
       setIsRunning(false);
       const errorMsg = error.response?.data?.detail || error.message;
       alert(`Connect/Start Failed: ${errorMsg}`);
+      addLog(`Start Failed: ${errorMsg}`);
     }
   };
 

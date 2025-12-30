@@ -40,7 +40,6 @@ class IQBot:
         self.trades_taken = 0
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
-        self.next_trading_time = None
 
     def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
         self.trade_amount = amount
@@ -121,15 +120,11 @@ class IQBot:
             self.api.change_balance(mode)
             
             self.update_balance()
-
-            # Set default trade amount to minimum based on currency
-            self.trade_amount = self.get_min_amount()
             
             # VERIFICATION: Log which account we're actually connected to
             self.add_log(f"✓ Connected as: {email}")
             self.add_log(f"✓ Balance: {self.currency}{self.balance}")
             self.add_log(f"✓ Mode: {mode}")
-            self.add_log(f"✓ Min Amount: {self.currency}{self.trade_amount}")
             
             return True, f"Connected successfully ({mode})"
         else:
@@ -149,19 +144,6 @@ class IQBot:
             
             return False, f"Connection failed: {reason}"
 
-    def get_min_amount(self):
-        """Returns the minimum trade amount for the current currency"""
-        # Map of currency to minimum trade amount (Approximate values)
-        # These values are based on typical IQ Option minimums
-        min_map = {
-            'USD': 1, 'EUR': 1, 'GBP': 1, 'AUD': 1, 'CAD': 1, 'NZD': 1,
-            'RUB': 60, 'BRL': 2, 'CNY': 10, 'JPY': 100,
-            'IDR': 14000, 'MYR': 5, 'THB': 30, 'VND': 20000,
-            'NGN': 1200, 'ZAR': 20, 'INR': 70, 'PHP': 50,
-            'KRW': 1000, 'TRY': 20, 'PLN': 5, 'MXN': 20
-        }
-        return min_map.get(self.currency, 1)
-
     def update_balance(self):
         if self.connected:
             self.balance = self.api.get_balance()
@@ -172,28 +154,8 @@ class IQBot:
         threading.Thread(target=self._trading_loop, daemon=True).start()
 
     def _trading_loop(self):
-        last_market_status_log = 0
-        
         while self.is_running and self.connected:
             try:
-                # Time Check (WAT: UTC+1)
-                # OTC pairs are 24/7, so we disable strict time checking for now
-                # is_open, next_open_str = self.check_trading_hours()
-                is_open = True 
-                
-                if not is_open:
-                    # Log only once every minute to avoid spamming
-                    if time.time() - last_market_status_log > 60:
-                        self.add_log(f"Market Closed. Next session: {next_open_str}")
-                        last_market_status_log = time.time()
-                    
-                    # Update status for frontend
-                    self.next_trading_time = next_open_str
-                    time.sleep(5)
-                    continue
-                else:
-                    self.next_trading_time = None # Clear if open
-
                 self.add_log("Starting market scan...")
 
                 for pair in self.pairs_to_scan:
@@ -221,44 +183,33 @@ class IQBot:
                 traceback.print_exc()
                 time.sleep(5)
 
-    def check_trading_hours(self):
-        """
-        Checks if current time is within trading hours (WAT).
-        Returns (bool, next_open_time_str)
-        """
-        utc_now = datetime.utcnow()
-        wat_now = utc_now + timedelta(hours=1)
-        current_time = wat_now.time()
-        
-        ranges = [
-            ("09:00", "11:30"),
-            ("14:00", "16:30"),
-            ("19:00", "21:00")
-        ]
-        
-        # Check if currently open
-        for start, end in ranges:
-            s = datetime.strptime(start, "%H:%M").time()
-            e = datetime.strptime(end, "%H:%M").time()
-            if s <= current_time <= e:
-                return True, None
-        
-        # If closed, find next open time
-        next_open = None
-        for start, _ in ranges:
-            s = datetime.strptime(start, "%H:%M").time()
-            if s > current_time:
-                next_open = start
-                break
-        
-        # If no next open time today, it's the first one tomorrow
-        if not next_open:
-            next_open = ranges[0][0] + " (Tomorrow)"
-            
-        return False, next_open
-
     def _process_pair(self, pair):
-        # Time Check is now handled in _trading_loop
+        # Time Check (WAT: UTC+1)
+        # OTC pairs are 24/7, so we skip time check for them
+        if "OTC" not in pair:
+            utc_now = datetime.utcnow()
+            wat_now = utc_now + timedelta(hours=1)
+            
+            # Ranges: 9:00-11:30, 14:00-16:30, 19:00-21:00
+            current_time = wat_now.time()
+            
+            can_trade = False
+            ranges = [
+                ("09:00", "11:30"),
+                ("14:00", "16:30"),
+                ("19:00", "21:00")
+            ]
+            
+            for start, end in ranges:
+                s = datetime.strptime(start, "%H:%M").time()
+                e = datetime.strptime(end, "%H:%M").time()
+                if s <= current_time <= e:
+                    can_trade = True
+                    break
+            
+            if not can_trade:
+                # self.add_log(f"Outside trading hours for {pair}")
+                return False
         
         # Analyze Strategy
         action = self.analyze_strategy(pair)
@@ -298,7 +249,6 @@ class IQBot:
             candles = self.api.get_candles(pair, 60, 100, time.time())
             
             if not candles or len(candles) < 60:
-                # self.add_log(f"Not enough candles for {pair}")
                 return None
                 
             # Convert to numpy arrays
@@ -326,32 +276,95 @@ class IQBot:
             c_ema50 = ema50[last_idx]
             
             # Trend Filter
-            is_uptrend = c_ema20 > c_ema50
-            is_downtrend = c_ema20 < c_ema50
+            is_uptrend = c_ema20 > c_ema50 and c_rsi > 50
+            is_downtrend = c_ema20 < c_ema50 and c_rsi < 50
             
-            # Simplified Strategy for OTC
-            # If trend matches and RSI is good (not overbought/oversold extremums but strong)
+            # EMA Separation Check
+            ema_dist = abs(c_ema20 - c_ema50)
+            min_dist = c_close * 0.00005 
+            if ema_dist < min_dist:
+                return None
             
+            if not is_uptrend and not is_downtrend:
+                return None
+                
+            # RSI Filter (45-55 NO TRADE)
+            if 45 <= c_rsi <= 55:
+                return None
+
+            # Volatility Check
+            last_bodies = np.abs(close_prices[-12:-2] - open_prices[-12:-2])
+            avg_body = np.mean(last_bodies)
+            
+            c_body_size = abs(c_close - c_open)
+            
+            # Low Volatility (Doji/Small)
+            if c_body_size < avg_body * 0.2:
+                return None
+                
+            # Impulse Candle (Huge) -> Avoid Exhaustion
+            if c_body_size > avg_body * 3.0:
+                return None
+
             # CALL SCENARIO
             if is_uptrend:
-                if c_rsi < 70 and c_close > c_ema20:
-                     # Check for bullish candle
-                     if c_close > c_open:
-                         # Simple continuation
-                         return "call"
+                is_bullish = c_close > c_open
+                if not is_bullish: 
+                    return None
+                
+                touched_zone = False
+                
+                if c_low <= c_ema20 * 1.0002 or c_low <= middle_bb[last_idx] * 1.0002:
+                     touched_zone = True
+                
+                if not touched_zone:
+                    p_low = low_prices[prev_idx]
+                    if p_low <= ema20[prev_idx] * 1.0002 or p_low <= middle_bb[prev_idx] * 1.0002:
+                        touched_zone = True
+                        
+                if not touched_zone:
+                    return None
+                    
+                # Confirmation types
+                is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
+                is_strong = c_body_size > avg_body
+                lower_wick = c_open - c_low if is_bullish else c_close - c_low
+                is_rejection = lower_wick > c_body_size * 0.5
+                
+                if is_engulfing or is_strong or is_rejection:
+                    return "call"
 
             # PUT SCENARIO
             elif is_downtrend:
-                 if c_rsi > 30 and c_close < c_ema20:
-                     # Check for bearish candle
-                     if c_close < c_open:
-                         # Simple continuation
-                         return "put"
+                is_bearish = c_close < c_open
+                if not is_bearish: 
+                    return None
+                
+                touched_zone = False
+                
+                if c_high >= c_ema20 * 0.9998 or c_high >= middle_bb[last_idx] * 0.9998:
+                    touched_zone = True
+                    
+                if not touched_zone:
+                    p_high = high_prices[prev_idx]
+                    if p_high >= ema20[prev_idx] * 0.9998 or p_high >= middle_bb[prev_idx] * 0.9998:
+                        touched_zone = True
+                        
+                if not touched_zone:
+                    return None
+                    
+                # Confirmation types
+                is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
+                is_strong = c_body_size > avg_body
+                upper_wick = c_high - c_open if is_bearish else c_high - c_close
+                is_rejection = upper_wick > c_body_size * 0.5
+                
+                if is_engulfing or is_strong or is_rejection:
+                    return "put"
                     
             return None
             
         except Exception as e:
-            self.add_log(f"Analysis Error ({pair}): {e}")
             print(f"Error in analysis: {e}")
             return None
 
