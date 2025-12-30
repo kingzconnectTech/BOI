@@ -101,9 +101,9 @@ class IQBot:
         self.email = email
         self.password = password
         
-        # Create NEW instance
+        # Create NEW instance - This acts as a separate "machine" for this user
         self.api = IQ_Option(email, password)
-        print(f"[IQBot] Created API instance {id(self.api)} for {email}")
+        print(f"[IQBot] Initializing separate bot instance {id(self.api)} for {email}")
         
         # Clear logs and stats on new connection to prevent data leak
         self.clear_logs()
