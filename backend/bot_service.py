@@ -97,6 +97,16 @@ def run_bot_process(email, password, mode, shared_dict, command_queue):
 
             time.sleep(1) # Sync every second
             
+        except (EOFError, BrokenPipeError, OSError) as e:
+            # Handle broken pipe specifically (often Errno 32)
+            if isinstance(e, OSError) and e.errno != 32:
+                 # If it's an OSError but NOT broken pipe, print it. 
+                 # If it IS broken pipe, we fall through to break.
+                 print(f"[BotProcess-{email}] OS Error: {e}")
+            else:
+                 print(f"[BotProcess-{email}] Parent connection lost (Broken Pipe). Terminating.")
+            break
+            
         except Exception as e:
             print(f"[BotProcess-{email}] Error: {e}")
             time.sleep(1)
@@ -134,6 +144,7 @@ class IsolatedBot:
             target=run_bot_process,
             args=(email, password, mode, self.shared_dict, self.command_queue)
         )
+        self.process.daemon = True # Ensure process dies if parent dies
         self.process.start()
         
         # Wait for connection result (timeout 30s)
