@@ -76,9 +76,7 @@ def read_root():
 
 @app.post("/connect")
 def connect_bot(data: ConnectRequest):
-    # FORCE NEW INSTANCE: Always destroy old bot and create fresh one
-    bot = bot_manager.force_new_bot(data.email)
-    
+    bot = bot_manager.get_bot(data.email)
     success, message = bot.connect(data.email, data.password, data.mode)
     if not success:
         # If connection fails, remove the bot to prevent zombie instances

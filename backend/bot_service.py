@@ -87,16 +87,6 @@ class IQBot:
     def clear_logs(self):
         self.logs = []
 
-    def reset_stats(self):
-        self.total_profit = 0
-        self.wins = 0
-        self.losses = 0
-        self.trades_taken = 0
-        self.current_consecutive_losses = 0
-        self.logs = []
-        self.balance = 0
-        self.currency = ""
-
     def connect(self, email, password, mode="PRACTICE"):
         # Force cleanup before connecting to ensure no stale session
         if self.api:
@@ -107,92 +97,80 @@ class IQBot:
                 pass
             self.api = None
             
-        self.reset_stats() # FORCE RESET ALL STATS AND VARIABLES
-        
         self.email = email
         self.password = password
         
         # 1. Initialize API
-        try:
-            # We use a global lock here just in case the library has thread-safety issues during init
-            with bot_manager.lock:
-                # CRITICAL: Remove any existing session file to prevent reusing old credentials
-                self._clear_session_file()
-                
-                print(f"Initializing IQ_Option for {email}")
-                self.api = IQ_Option(email, password)
-                
-                # Clear logs and stats on new connection to prevent data leak
-                self.clear_logs() 
-                self.reset_stats()
-                
-                # Attempt connection
-                print("Connecting to IQ Option API...")
-                check, reason = self.api.connect()
-        except Exception as e:
-            print(f"CRITICAL ERROR during connection initialization: {e}")
-            traceback.print_exc()
-            return False, f"Internal Error during connection: {str(e)}"
+        # We use a global lock here just in case the library has thread-safety issues during init
+        with bot_manager.lock:
+            # CRITICAL: Remove any existing session file to prevent reusing old credentials
+            self._clear_session_file()
+            
+            # Create FRESH instance
+            self.api = IQ_Option(email, password)
+            
+            # Clear logs and stats on new connection to prevent data leak
+            self.clear_logs() 
+            self.reset_stats()
+            self.balance = 0
+            self.currency = ""
+            
+            # Attempt connection
+            check, reason = self.api.connect()
         
         if check:
             self.connected = True
-            print("API Connected. Verifying identity...")
             
             # 2. Identity Verification
             # We must verify that the connected account matches the requested email
             try:
-                # Wait for profile data to be populated (timeout 30s)
+                # Wait for profile data to be populated (timeout 10s)
                 # In iqoptionapi, profile is usually in self.api.profile.msg
                 profile_email = None
-                
-                # Force a profile update request
-                self.api.get_profile_ansyc()
-                
-                start_time = time.time()
-                while time.time() - start_time < 30: # 30 seconds timeout
+                for _ in range(20): # 10 seconds wait
                      if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
-                         # Depending on library version, msg might be the dict or msg['result']
-                         msg = self.api.profile.msg
-                         if isinstance(msg, dict):
-                             profile_email = msg.get('email')
-                         
+                         profile_email = self.api.profile.msg.get('email')
                          if profile_email:
-                             print(f"Profile email found: {profile_email}")
                              break
-                     
-                     # Re-trigger profile fetch every 5 seconds if still waiting
-                     if int(time.time() - start_time) % 5 == 0:
-                         self.api.get_profile_ansyc()
-                         
                      time.sleep(0.5)
                 
+                # If we couldn't get it via property, try get_profile_ansyc
+                if not profile_email:
+                     self.api.get_profile_ansyc()
+                     time.sleep(2)
+                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
+                         profile_email = self.api.profile.msg.get('email')
+
                 # STRICT EMAIL CHECK
                 if profile_email:
                     if profile_email.lower().strip() != email.lower().strip():
                         self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {profile_email}. Disconnecting.")
-                        self.disconnect() 
-                        return False, f"Session Error: Connected to {profile_email} instead of {email}."
+                        self.disconnect() # This now also calls _clear_session_file
+                        return False, "Session Error: Connected to wrong account. Please try again."
                 else:
-                    # If we can't verify, we log a warning but PROCEED if balance check works
-                    # We assume _clear_session_file handled the "wrong account" risk
-                    self.add_log("Warning: Email verification timed out. Proceeding based on clean session.")
-                    print("Warning: Email verification timed out.")
+                    self.add_log("Error: Could not verify connected email. Aborting connection for safety.")
+                    self.disconnect()
+                    return False, "Connection Error: Could not verify account identity. Please try again."
 
                 # Check balance to ensure it's fresh
                 self.api.change_balance(mode)
                 time.sleep(1) # Wait for mode change to propagate
+                
+                # FORCE REFRESH BALANCE
+                self.api.get_balance()
+                time.sleep(1)
                 self.balance = self.api.get_balance()
                 self.currency = self.api.get_currency()
                 
+                # Double check balance isn't None
+                if self.balance is None:
+                     time.sleep(1)
+                     self.balance = self.api.get_balance()
+                
             except Exception as e:
-                print(f"Profile/Balance check error: {e}")
-                traceback.print_exc()
-                self.disconnect()
-                return False, f"Error verifying account: {str(e)}"
+                print(f"Profile/Balance check warning: {e}")
 
             self.update_balance()
-            self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
-            return True, f"Connected successfully ({mode})"
             self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
@@ -639,27 +617,8 @@ class BotManager:
     def get_bot(self, email):
         email = email.lower().strip()
         with self.lock:
-            # Note: We do NOT reuse the existing bot object if the user is reconnecting.
-            # We want a fresh start. But if we just replace it, we might leave a thread running?
-            # The 'disconnect' logic should handle stopping threads.
             if email not in self.bots:
                 self.bots[email] = IQBot()
-            return self.bots[email]
-    
-    def force_new_bot(self, email):
-        """Destroys existing bot and creates a brand new instance"""
-        email = email.lower().strip()
-        with self.lock:
-            if email in self.bots:
-                print(f"Destroying old bot instance for {email}")
-                try:
-                    self.bots[email].disconnect() # Stop threads, close socket
-                except:
-                    pass
-                del self.bots[email]
-            
-            print(f"Creating fresh bot instance for {email}")
-            self.bots[email] = IQBot()
             return self.bots[email]
     
     def remove_bot(self, email):
