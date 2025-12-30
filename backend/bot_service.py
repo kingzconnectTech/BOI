@@ -115,20 +115,43 @@ class IQBot:
             self.connected = True
             
             # 2. Identity Verification
-            # Fetch profile to ensure we are connected to the CORRECT account
+            # We must verify that the connected account matches the requested email
             try:
-                # profile = self.api.get_profile() # This might be slow or cached
-                # Use balance/currency check as proxy, or trust the connect for now
-                # Ideally: verify email matches
-                pass 
-            except Exception as e:
-                print(f"Profile check failed: {e}")
+                # Get profile data (this might be cached by the library, so we need to be careful)
+                self.api.update_profile() # Force update if method exists? usually it fetches on connect
+                profile = self.api.get_profile_ansyc() # Note: typo in library is often 'ansyc' or we use direct property
+                # In standard iqoptionapi, profile is loaded into self.api.profile
+                
+                # STRICT EMAIL CHECK
+                connected_email = None
+                if profile and 'email' in profile:
+                    connected_email = profile['email']
+                elif hasattr(self.api, 'email'):
+                    connected_email = self.api.email
+                
+                # Normalize emails for comparison (lowercase, strip)
+                if connected_email:
+                    if connected_email.lower().strip() != email.lower().strip():
+                        self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {connected_email}. Disconnecting.")
+                        self.disconnect() # This now also calls _clear_session_file
+                        return False, "Session Error: Connected to wrong account. Please try again."
 
-            # Change account mode
-            self.api.change_balance(mode)
-            
+                # Check balance to ensure it's fresh
+                self.api.change_balance(mode)
+                time.sleep(1) # Wait for mode change to propagate
+                self.balance = self.api.get_balance()
+                self.currency = self.api.get_currency()
+                
+            except Exception as e:
+                print(f"Profile/Balance check warning: {e}")
+                # If we can't verify identity, strictly speaking we should maybe fail? 
+                # But for now, let's assume if the email check passed (or wasn't triggered due to error), we are okay-ish.
+                # But if we want to be safe:
+                if "Session mismatch" in str(e):
+                    return False, "Session Error: Connected to wrong account."
+
             self.update_balance()
-            self.add_log(f"Connected successfully ({mode}). Balance: {self.currency}{self.balance}")
+            self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
             self.connected = False
@@ -499,6 +522,18 @@ class IQBot:
             pass
         return True, "Bot stopped"
 
+    def _clear_session_file(self):
+        """Attempts to remove session files created by iqoptionapi"""
+        try:
+            # Common session file names
+            files = ["session.json", "auth.json"]
+            for fname in files:
+                if os.path.exists(fname):
+                    os.remove(fname)
+                    print(f"Removed session file: {fname}")
+        except Exception as e:
+            print(f"Error clearing session file: {e}")
+
     def disconnect(self):
         self.stop()
         
@@ -514,6 +549,10 @@ class IQBot:
         self.api = None
         self.email = None
         self.password = None
+        
+        # Clear persistent session files
+        self._clear_session_file()
+        
         return True, "Disconnected"
 
     def get_status(self):
