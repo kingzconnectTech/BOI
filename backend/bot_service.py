@@ -2,7 +2,8 @@ from iqoptionapi.stable_api import IQ_Option
 import time
 import threading
 import random
-
+import os
+import glob
 import traceback
 
 import talib
@@ -102,6 +103,9 @@ class IQBot:
         # 1. Initialize API
         # We use a global lock here just in case the library has thread-safety issues during init
         with bot_manager.lock:
+            # CRITICAL: Remove any existing session file to prevent reusing old credentials
+            self._clear_session_file()
+            
             self.api = IQ_Option(email, password)
             
             # Clear logs and stats on new connection to prevent data leak
