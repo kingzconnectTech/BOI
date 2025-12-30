@@ -87,6 +87,15 @@ class IQBot:
         self.logs = []
 
     def connect(self, email, password, mode="PRACTICE"):
+        # Force cleanup before connecting to ensure no stale session
+        if self.api:
+            try:
+                self.api.api.close()
+                del self.api
+            except:
+                pass
+            self.api = None
+            
         self.email = email
         self.password = password
         self.api = IQ_Option(email, password)
@@ -467,6 +476,15 @@ class IQBot:
 
     def disconnect(self):
         self.stop()
+        
+        # Explicitly close the API connection to prevent zombie threads
+        if self.api:
+            try:
+                self.api.api.close()
+                del self.api
+            except Exception as e:
+                print(f"Error closing API: {e}")
+                
         self.connected = False
         self.api = None
         self.email = None
