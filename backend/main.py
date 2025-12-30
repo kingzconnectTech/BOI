@@ -36,7 +36,7 @@ app.add_middleware(
 
 # Keep-Alive Mechanism for Render Free Tier
 def keep_alive():
-    url = "https://boi-lgdy.onrender.com"
+    url = "https://boi-9ixk.onrender.com"
     while True:
         try:
             time.sleep(600) # Ping every 10 minutes
