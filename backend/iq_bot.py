@@ -177,7 +177,9 @@ class IQBot:
         while self.is_running and self.connected:
             try:
                 # Time Check (WAT: UTC+1)
-                is_open, next_open_str = self.check_trading_hours()
+                # OTC pairs are 24/7, so we disable strict time checking for now
+                # is_open, next_open_str = self.check_trading_hours()
+                is_open = True 
                 
                 if not is_open:
                     # Log only once every minute to avoid spamming
@@ -296,6 +298,7 @@ class IQBot:
             candles = self.api.get_candles(pair, 60, 100, time.time())
             
             if not candles or len(candles) < 60:
+                # self.add_log(f"Not enough candles for {pair}")
                 return None
                 
             # Convert to numpy arrays
@@ -323,95 +326,32 @@ class IQBot:
             c_ema50 = ema50[last_idx]
             
             # Trend Filter
-            is_uptrend = c_ema20 > c_ema50 and c_rsi > 50
-            is_downtrend = c_ema20 < c_ema50 and c_rsi < 50
+            is_uptrend = c_ema20 > c_ema50
+            is_downtrend = c_ema20 < c_ema50
             
-            # EMA Separation Check
-            ema_dist = abs(c_ema20 - c_ema50)
-            min_dist = c_close * 0.00005 
-            if ema_dist < min_dist:
-                return None
+            # Simplified Strategy for OTC
+            # If trend matches and RSI is good (not overbought/oversold extremums but strong)
             
-            if not is_uptrend and not is_downtrend:
-                return None
-                
-            # RSI Filter (45-55 NO TRADE)
-            if 45 <= c_rsi <= 55:
-                return None
-
-            # Volatility Check
-            last_bodies = np.abs(close_prices[-12:-2] - open_prices[-12:-2])
-            avg_body = np.mean(last_bodies)
-            
-            c_body_size = abs(c_close - c_open)
-            
-            # Low Volatility (Doji/Small)
-            if c_body_size < avg_body * 0.2:
-                return None
-                
-            # Impulse Candle (Huge) -> Avoid Exhaustion
-            if c_body_size > avg_body * 3.0:
-                return None
-
             # CALL SCENARIO
             if is_uptrend:
-                is_bullish = c_close > c_open
-                if not is_bullish: 
-                    return None
-                
-                touched_zone = False
-                
-                if c_low <= c_ema20 * 1.0002 or c_low <= middle_bb[last_idx] * 1.0002:
-                     touched_zone = True
-                
-                if not touched_zone:
-                    p_low = low_prices[prev_idx]
-                    if p_low <= ema20[prev_idx] * 1.0002 or p_low <= middle_bb[prev_idx] * 1.0002:
-                        touched_zone = True
-                        
-                if not touched_zone:
-                    return None
-                    
-                # Confirmation types
-                is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
-                is_strong = c_body_size > avg_body
-                lower_wick = c_open - c_low if is_bullish else c_close - c_low
-                is_rejection = lower_wick > c_body_size * 0.5
-                
-                if is_engulfing or is_strong or is_rejection:
-                    return "call"
+                if c_rsi < 70 and c_close > c_ema20:
+                     # Check for bullish candle
+                     if c_close > c_open:
+                         # Simple continuation
+                         return "call"
 
             # PUT SCENARIO
             elif is_downtrend:
-                is_bearish = c_close < c_open
-                if not is_bearish: 
-                    return None
-                
-                touched_zone = False
-                
-                if c_high >= c_ema20 * 0.9998 or c_high >= middle_bb[last_idx] * 0.9998:
-                    touched_zone = True
-                    
-                if not touched_zone:
-                    p_high = high_prices[prev_idx]
-                    if p_high >= ema20[prev_idx] * 0.9998 or p_high >= middle_bb[prev_idx] * 0.9998:
-                        touched_zone = True
-                        
-                if not touched_zone:
-                    return None
-                    
-                # Confirmation types
-                is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
-                is_strong = c_body_size > avg_body
-                upper_wick = c_high - c_open if is_bearish else c_high - c_close
-                is_rejection = upper_wick > c_body_size * 0.5
-                
-                if is_engulfing or is_strong or is_rejection:
-                    return "put"
+                 if c_rsi > 30 and c_close < c_ema20:
+                     # Check for bearish candle
+                     if c_close < c_open:
+                         # Simple continuation
+                         return "put"
                     
             return None
             
         except Exception as e:
+            self.add_log(f"Analysis Error ({pair}): {e}")
             print(f"Error in analysis: {e}")
             return None
 
