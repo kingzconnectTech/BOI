@@ -121,24 +121,31 @@ class IQBot:
             # 2. Identity Verification
             # We must verify that the connected account matches the requested email
             try:
-                # Get profile data (this might be cached by the library, so we need to be careful)
-                self.api.update_profile() # Force update if method exists? usually it fetches on connect
-                profile = self.api.get_profile_ansyc() # Note: typo in library is often 'ansyc' or we use direct property
-                # In standard iqoptionapi, profile is loaded into self.api.profile
+                # Wait for profile data to be populated (timeout 10s)
+                # In iqoptionapi, profile is usually in self.api.profile.msg
+                profile_email = None
+                for _ in range(20): # 10 seconds wait
+                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
+                         profile_email = self.api.profile.msg.get('email')
+                         if profile_email:
+                             break
+                     time.sleep(0.5)
                 
+                # If we couldn't get it via property, try get_profile_ansyc
+                if not profile_email:
+                     self.api.get_profile_ansyc()
+                     time.sleep(2)
+                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
+                         profile_email = self.api.profile.msg.get('email')
+
                 # STRICT EMAIL CHECK
-                connected_email = None
-                if profile and 'email' in profile:
-                    connected_email = profile['email']
-                elif hasattr(self.api, 'email'):
-                    connected_email = self.api.email
-                
-                # Normalize emails for comparison (lowercase, strip)
-                if connected_email:
-                    if connected_email.lower().strip() != email.lower().strip():
-                        self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {connected_email}. Disconnecting.")
+                if profile_email:
+                    if profile_email.lower().strip() != email.lower().strip():
+                        self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {profile_email}. Disconnecting.")
                         self.disconnect() # This now also calls _clear_session_file
                         return False, "Session Error: Connected to wrong account. Please try again."
+                else:
+                    self.add_log("Warning: Could not verify connected email. Proceeding with caution.")
 
                 # Check balance to ensure it's fresh
                 self.api.change_balance(mode)
@@ -148,11 +155,6 @@ class IQBot:
                 
             except Exception as e:
                 print(f"Profile/Balance check warning: {e}")
-                # If we can't verify identity, strictly speaking we should maybe fail? 
-                # But for now, let's assume if the email check passed (or wasn't triggered due to error), we are okay-ish.
-                # But if we want to be safe:
-                if "Session mismatch" in str(e):
-                    return False, "Session Error: Connected to wrong account."
 
             self.update_balance()
             self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
