@@ -312,8 +312,132 @@ class IQBot:
              return self.strategy_rsi_reversal(pair)
         elif self.strategy == "EMA Trend Pullback":
              return self.strategy_ema_trend_pullback(pair)
+        elif self.strategy == "Support & Resistance":
+             return self.strategy_support_resistance(pair)
         else:
              return self.strategy_momentum(pair)
+
+    def strategy_support_resistance(self, pair):
+        try:
+            # Fetch Candles (1 min timeframe = 60s)
+            # Need slightly more history for S/R zones
+            candles = self.api.get_candles(pair, 60, 150, time.time())
+            
+            if not candles or len(candles) < 100:
+                return None, "Not enough candles"
+                
+            # Convert to numpy arrays
+            close_prices = np.array([c['close'] for c in candles], dtype=float)
+            open_prices = np.array([c['open'] for c in candles], dtype=float)
+            high_prices = np.array([c['max'] for c in candles], dtype=float)
+            low_prices = np.array([c['min'] for c in candles], dtype=float)
+            
+            # Indicators
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            
+            # Indices: 
+            # -1 is current incomplete candle (ignore)
+            # -2 is confirmation candle (must be bullish/bearish close)
+            # -3 is rejection candle (must be pinbar/rejection at zone)
+            
+            idx_conf = -2
+            idx_rej = -3
+            
+            # Confirmation Candle Data
+            conf_close = close_prices[idx_conf]
+            conf_open = open_prices[idx_conf]
+            
+            # Rejection Candle Data
+            rej_close = close_prices[idx_rej]
+            rej_open = open_prices[idx_rej]
+            rej_high = high_prices[idx_rej]
+            rej_low = low_prices[idx_rej]
+            rej_body_size = abs(rej_close - rej_open)
+            rej_total_size = rej_high - rej_low
+            
+            # RSI at rejection moment (using idx_rej is safer as per instructions)
+            rej_rsi = rsi[idx_rej]
+            
+            if rej_total_size == 0:
+                return None, "Doji (Zero Size)"
+
+            # --- HELPER: Find S/R Zones ---
+            # We look at past 60 candles before rejection candle
+            past_lows = low_prices[idx_rej-60 : idx_rej]
+            past_highs = high_prices[idx_rej-60 : idx_rej]
+            
+            # Function to check if price is near a level with >= 3 touches
+            def is_near_level(price, levels, threshold=0.0003, min_touches=3):
+                # Simple clustering
+                # Count how many levels are within threshold of price
+                count = 0
+                for lvl in levels:
+                    if abs(price - lvl) < threshold:
+                        count += 1
+                return count >= min_touches
+
+            # CALL SCENARIO
+            # 1. Price touches support (Rejection candle Low is near support zone)
+            # 2. Rejection candle (Long lower wick)
+            # 3. RSI 25-40
+            # 4. Confirmation candle is Bullish
+            
+            is_call_rsi = 25 <= rej_rsi <= 40
+            is_call_rejection = False
+            
+            # Calculate Lower Wick
+            lower_wick = min(rej_open, rej_close) - rej_low
+            # Wick should be significant (e.g., > 40% of total candle size or > body)
+            if lower_wick > rej_total_size * 0.4:
+                is_call_rejection = True
+                
+            # Check Support Zone
+            # We check if 'rej_low' is near previous lows
+            is_support_zone = is_near_level(rej_low, past_lows)
+            
+            # Check Confirmation
+            is_conf_bullish = conf_close > conf_open
+            
+            if is_call_rsi and is_call_rejection and is_support_zone and is_conf_bullish:
+                return "call", f"S&R Call (RSI: {rej_rsi:.1f}, RejWick: {lower_wick:.5f})"
+                
+            # PUT SCENARIO
+            # 1. Price touches resistance (Rejection candle High is near resistance zone)
+            # 2. Rejection candle (Long upper wick)
+            # 3. RSI 60-75
+            # 4. Confirmation candle is Bearish
+            
+            is_put_rsi = 60 <= rej_rsi <= 75
+            is_put_rejection = False
+            
+            # Calculate Upper Wick
+            upper_wick = rej_high - max(rej_open, rej_close)
+            if upper_wick > rej_total_size * 0.4:
+                is_put_rejection = True
+                
+            # Check Resistance Zone
+            is_resistance_zone = is_near_level(rej_high, past_highs)
+            
+            # Check Confirmation
+            is_conf_bearish = conf_close < conf_open
+            
+            if is_put_rsi and is_put_rejection and is_resistance_zone and is_conf_bearish:
+                return "put", f"S&R Put (RSI: {rej_rsi:.1f}, RejWick: {upper_wick:.5f})"
+
+            # Debugging / Reason
+            reason = []
+            if is_call_rsi: reason.append("RSI Call OK")
+            if is_put_rsi: reason.append("RSI Put OK")
+            if is_call_rejection: reason.append("Call Rej OK")
+            if is_put_rejection: reason.append("Put Rej OK")
+            if is_support_zone: reason.append("Supp Zone OK")
+            if is_resistance_zone: reason.append("Res Zone OK")
+            
+            return None, f"No Setup. Matches: {', '.join(reason) if reason else 'None'}"
+
+        except Exception as e:
+            return None, f"Error S&R: {e}"
+
 
     def strategy_ema_trend_pullback(self, pair):
         try:

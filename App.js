@@ -624,6 +624,12 @@ export default function App() {
                 >
                     <Text style={[styles.strategyText, strategy === 'EMA Trend Pullback' && styles.strategyTextActive]}>EMA Trend</Text>
                 </TouchableOpacity>
+                <TouchableOpacity 
+                    style={[styles.strategyOption, strategy === 'Support & Resistance' && styles.strategyOptionActive]}
+                    onPress={() => handleUpdateStrategy('Support & Resistance')}
+                >
+                    <Text style={[styles.strategyText, strategy === 'Support & Resistance' && styles.strategyTextActive]}>Support & Res</Text>
+                </TouchableOpacity>
             </ScrollView>
         </View>
         
