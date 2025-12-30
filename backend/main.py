@@ -141,11 +141,15 @@ def disconnect_bot(request: DisconnectRequest):
 @app.get("/status")
 def get_status(email: str):
     bot = bot_manager.get_bot(email)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not connected")
     return bot.get_status()
 
 @app.get("/logs")
 def get_logs(email: str):
     bot = bot_manager.get_bot(email)
+    if not bot:
+        return {"logs": []} # Return empty logs instead of error if bot not found
     return {"logs": bot.get_logs()}
 
 if __name__ == "__main__":
