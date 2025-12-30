@@ -36,7 +36,7 @@ app.add_middleware(
 
 # Keep-Alive Mechanism for Render Free Tier
 def keep_alive():
-    url = "https://boi-lgdy.onrender.com"
+    url = "http://localhost:8000"
     while True:
         try:
             time.sleep(600) # Ping every 10 minutes
@@ -67,12 +67,24 @@ class LoginRequest(BaseModel):
     max_trades: int = 0
     auto_trading: bool = True
     push_token: str = None # Added for Push Notifications
+    strategy: str = "Momentum" # Added for Strategy Selection
 
 class StopRequest(BaseModel):
     email: str
 
 class DisconnectRequest(BaseModel):
     email: str
+
+class UpdateRequest(BaseModel):
+    email: str
+    amount: float = None
+    duration: int = None
+    stop_loss: float = None
+    take_profit: float = None
+    max_consecutive_losses: int = None
+    max_trades: int = None
+    auto_trading: bool = None
+    strategy: str = None
 
 @app.get("/")
 def read_root():
@@ -111,7 +123,8 @@ def start_bot(login_data: LoginRequest):
             login_data.take_profit,
             login_data.max_consecutive_losses,
             login_data.max_trades,
-            login_data.auto_trading
+            login_data.auto_trading,
+            login_data.strategy
         )
         
         # Set Push Token
@@ -125,6 +138,26 @@ def start_bot(login_data: LoginRequest):
         return {"status": "started", "message": message, "data": status}
     except Exception as e:
         print(f"Error starting bot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update")
+def update_bot(data: UpdateRequest):
+    try:
+        bot = bot_manager.get_bot(data.email)
+        if not bot:
+             raise HTTPException(status_code=404, detail="Bot not found")
+        
+        # Filter out None values
+        config_update = {k: v for k, v in data.dict().items() if v is not None and k != 'email'}
+        
+        if config_update:
+            bot.update_config(config_update)
+            return {"status": "updated", "message": "Configuration updated"}
+        else:
+            return {"status": "no_change", "message": "No configuration provided"}
+            
+    except Exception as e:
+        print(f"Error updating bot: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stop")

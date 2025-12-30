@@ -4,6 +4,7 @@ import threading
 import traceback
 import talib
 import numpy as np
+import uuid
 from datetime import datetime, timedelta
 from exponent_server_sdk import PushClient, PushMessage
 
@@ -21,6 +22,8 @@ class IQBot:
         self.balance = 0
         self.currency = ""
         self.logs = []  # Store logs for frontend
+        self.signals = [] # Store simulated signals
+        self.active_simulations = {} # Track active simulations to prevent duplicates
         
         # Trade Config - Instance specific
         self.pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC", "EURJPY-OTC"]
@@ -29,9 +32,10 @@ class IQBot:
         self.stop_loss = 0
         self.take_profit = 0
         self.max_consecutive_losses = 0
-        self.max_trades = 0  # 0 means unlimited
+        self.max_trades = 1  # 0 means unlimited
         self.auto_trading = True
         self.push_token = None  # Expo Push Token
+        self.strategy = "Momentum"
         
         self.initial_balance = 0
         self.total_profit = 0
@@ -40,8 +44,9 @@ class IQBot:
         self.trades_taken = 0
         self.trade_in_progress = False
         self.current_consecutive_losses = 0
+        self.next_trading_time = 0
 
-    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
+    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True, strategy="Momentum"):
         self.trade_amount = amount
         self.trade_duration = duration
         self.stop_loss = stop_loss
@@ -49,6 +54,7 @@ class IQBot:
         self.max_consecutive_losses = max_consecutive_losses
         self.max_trades = max_trades
         self.auto_trading = auto_trading
+        self.strategy = strategy
         
     def set_push_token(self, token):
         self.push_token = token
@@ -84,6 +90,9 @@ class IQBot:
 
     def get_logs(self):
         return self.logs
+
+    def get_signals(self):
+        return self.signals
 
     def clear_logs(self):
         self.logs = []
@@ -150,10 +159,16 @@ class IQBot:
             self.currency = self.api.get_currency()
 
     def start_trading(self):
+        if self.is_running:
+            self.add_log("Bot is already running.")
+            return
+            
         self.is_running = True
+        self.add_log("Starting trading loop...")
         threading.Thread(target=self._trading_loop, daemon=True).start()
 
     def _trading_loop(self):
+        self.add_log("Trading loop started.")
         while self.is_running and self.connected:
             try:
                 self.add_log("Starting market scan...")
@@ -177,6 +192,7 @@ class IQBot:
                         self.add_log(f"Error analysing {pair}: {str(e)}")
                         
                 self.add_log("Scan complete. Waiting...")
+                self.next_trading_time = time.time() + 2
                 time.sleep(2)  # Wait a bit before next scan cycle
             except Exception as e:
                 print(f"Error in trading loop: {e}")
@@ -184,41 +200,30 @@ class IQBot:
                 time.sleep(5)
 
     def _process_pair(self, pair):
-        # Time Check (WAT: UTC+1)
-        # OTC pairs are 24/7, so we skip time check for them
-        if "OTC" not in pair:
-            utc_now = datetime.utcnow()
-            wat_now = utc_now + timedelta(hours=1)
-            
-            # Ranges: 9:00-11:30, 14:00-16:30, 19:00-21:00
-            current_time = wat_now.time()
-            
-            can_trade = False
-            ranges = [
-                ("09:00", "11:30"),
-                ("14:00", "16:30"),
-                ("19:00", "21:00")
-            ]
-            
-            for start, end in ranges:
-                s = datetime.strptime(start, "%H:%M").time()
-                e = datetime.strptime(end, "%H:%M").time()
-                if s <= current_time <= e:
-                    can_trade = True
-                    break
-            
-            if not can_trade:
-                # self.add_log(f"Outside trading hours for {pair}")
+        if not self.is_running:
+            return False
+
+        # Check for active simulation on this pair to prevent duplicates
+        if not self.auto_trading and pair in self.active_simulations:
+            if time.time() < self.active_simulations[pair]:
+                # self.add_log(f"Skipping {pair}: Active simulation in progress.") # Optional log
                 return False
-        
+            else:
+                # Cleanup expired
+                del self.active_simulations[pair]
+            
         # Analyze Strategy
-        action = self.analyze_strategy(pair)
+        action, reason = self.analyze_strategy(pair)
+        
+        # Log analysis (optional: restrict to errors or important status to avoid spam)
+        # But user requested "show pair being analysed", so we log it.
+        self.add_log(f"Analysis {pair}: {reason}")
         
         if action:
             direction = action
             
-            # Expiry Rule: 2 min expiry
-            expiry_duration = 2 
+            # Expiry Rule: Use configured duration
+            expiry_duration = self.trade_duration 
             
             # Money Management: Risk 1-2% per trade
             safe_max = max(1.0, self.balance * 0.02)
@@ -226,7 +231,37 @@ class IQBot:
             
             # Check Auto Trading
             if not self.auto_trading:
-                self.add_log(f"SIGNAL: {pair} {direction.upper()} (Simulation)")
+                # Simulation Logic
+                try:
+                    # Get current price for entry
+                    candle = self.api.get_candles(pair, 60, 1, time.time())
+                    entry_price = float(candle[-1]['close'])
+                except:
+                    entry_price = 0
+                
+                signal_id = str(uuid.uuid4())[:8]
+                timestamp_str = time.strftime("%H:%M:%S")
+                
+                signal = {
+                    "id": signal_id,
+                    "pair": pair,
+                    "direction": direction,
+                    "entry": entry_price,
+                    "exit": 0,
+                    "status": "Running",
+                    "time": timestamp_str,
+                    "timestamp": time.time()
+                }
+                
+                self.signals.insert(0, signal) # Add to top
+                self.signals = self.signals[:50] # Keep last 50
+                
+                # Register active simulation
+                self.active_simulations[pair] = time.time() + (expiry_duration * 60)
+                
+                self.add_log(f"SIMULATION: {pair} {direction} @ {entry_price}")
+                
+                threading.Thread(target=self._monitor_simulation, args=(signal_id, pair, direction, expiry_duration, entry_price), daemon=True).start()
                 return True 
             
             # Place Trade
@@ -243,13 +278,158 @@ class IQBot:
                 
         return False
 
+    def _monitor_simulation(self, signal_id, pair, direction, duration, entry_price):
+        # Wait for expiry
+        time.sleep(duration * 60)
+        
+        try:
+            # Get exit price
+            candle = self.api.get_candles(pair, 60, 1, time.time())
+            exit_price = float(candle[-1]['close'])
+            
+            # Find and update signal
+            for s in self.signals:
+                if s['id'] == signal_id:
+                    s['exit'] = exit_price
+                    
+                    status = 'TIE'
+                    if direction == 'call':
+                        if exit_price > entry_price: status = 'WIN'
+                        elif exit_price < entry_price: status = 'LOSS'
+                    else: # put
+                        if exit_price < entry_price: status = 'WIN'
+                        elif exit_price > entry_price: status = 'LOSS'
+                    
+                    s['status'] = status
+                    self.add_log(f"SIM RESULT: {pair} {status} ({entry_price} -> {exit_price})")
+                    break
+        except Exception as e:
+            print(f"Sim error: {e}")
+            self.add_log(f"Error checking simulation result: {e}")
+
     def analyze_strategy(self, pair):
+        if self.strategy == "RSI Reversal":
+             return self.strategy_rsi_reversal(pair)
+        elif self.strategy == "EMA Trend Pullback":
+             return self.strategy_ema_trend_pullback(pair)
+        else:
+             return self.strategy_momentum(pair)
+
+    def strategy_ema_trend_pullback(self, pair):
         try:
             # Fetch Candles (1 min timeframe = 60s)
             candles = self.api.get_candles(pair, 60, 100, time.time())
             
             if not candles or len(candles) < 60:
-                return None
+                return None, "Not enough candles"
+                
+            # Convert to numpy arrays
+            close_prices = np.array([c['close'] for c in candles], dtype=float)
+            open_prices = np.array([c['open'] for c in candles], dtype=float)
+            low_prices = np.array([c['min'] for c in candles], dtype=float)
+            high_prices = np.array([c['max'] for c in candles], dtype=float)
+            
+            # Indicators: EMA 9, EMA 21, RSI 14
+            ema9 = talib.EMA(close_prices, timeperiod=9)
+            ema21 = talib.EMA(close_prices, timeperiod=21)
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            
+            # Analysis on the last completed candle (index -2)
+            last_idx = -2
+            
+            c_close = close_prices[last_idx]
+            c_open = open_prices[last_idx]
+            c_low = low_prices[last_idx]
+            c_high = high_prices[last_idx]
+            
+            c_ema9 = ema9[last_idx]
+            c_ema21 = ema21[last_idx]
+            c_rsi = rsi[last_idx]
+            
+            # Trend Identification
+            # UP Trend: EMA 9 > EMA 21
+            # DOWN Trend: EMA 9 < EMA 21
+            is_uptrend = c_ema9 > c_ema21
+            is_downtrend = c_ema9 < c_ema21
+            
+            # Avoid Flat EMAs / Crossovers (ensure some separation)
+            ema_dist = abs(c_ema9 - c_ema21)
+            min_dist = c_close * 0.0001 # Minimum separation threshold
+            if ema_dist < min_dist:
+                 return None, f"Flat/Crossing EMAs (Dist: {ema_dist:.5f})"
+
+            # CALL Entry Logic
+            if is_uptrend:
+                # Price pulls back and touches or nearly touches EMA 21
+                # We check if the Low of the candle touched EMA 21 region
+                # Touching region: Low <= EMA21 * 1.0002 (slightly above allowed) AND High >= EMA21
+                
+                touched_ema21 = c_low <= c_ema21 * 1.0002 and c_high >= c_ema21 * 0.9998
+                
+                # RSI stays above 50
+                rsi_ok = c_rsi > 50
+                
+                # Entry candle closes bullish (Close > Open)
+                is_bullish = c_close > c_open
+                
+                if touched_ema21 and rsi_ok and is_bullish:
+                     return "call", f"EMA Pullback UP (RSI: {c_rsi:.1f})"
+                else:
+                     return None, f"No Call Setup (Trend UP, RSI: {c_rsi:.1f}, Bullish: {is_bullish})"
+
+            # PUT Entry Logic
+            elif is_downtrend:
+                # Price pulls back to EMA 21
+                # Touching region: High >= EMA21 * 0.9998 AND Low <= EMA21
+                
+                touched_ema21 = c_high >= c_ema21 * 0.9998 and c_low <= c_ema21 * 1.0002
+                
+                # RSI stays below 50
+                rsi_ok = c_rsi < 50
+                
+                # Entry candle closes bearish (Close < Open)
+                is_bearish = c_close < c_open
+                
+                if touched_ema21 and rsi_ok and is_bearish:
+                     return "put", f"EMA Pullback DOWN (RSI: {c_rsi:.1f})"
+                else:
+                     return None, f"No Put Setup (Trend DOWN, RSI: {c_rsi:.1f}, Bearish: {is_bearish})"
+            
+            return None, "No Trend"
+
+        except Exception as e:
+            return None, f"Error: {e}"
+
+    def strategy_rsi_reversal(self, pair):
+        try:
+            # Fetch Candles (1 min timeframe = 60s)
+            candles = self.api.get_candles(pair, 60, 100, time.time())
+            if not candles or len(candles) < 60:
+                return None, "Not enough candles"
+                
+            close_prices = np.array([c['close'] for c in candles], dtype=float)
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            
+            last_idx = -2
+            c_rsi = rsi[last_idx]
+            
+            # Simple Reversal Logic
+            if c_rsi > 70:
+                return "put", f"RSI Overbought ({c_rsi:.1f})"
+            elif c_rsi < 30:
+                return "call", f"RSI Oversold ({c_rsi:.1f})"
+                
+            return None, f"RSI Neutral ({c_rsi:.1f})"
+        except Exception as e:
+            return None, f"Error: {e}"
+
+    def strategy_momentum(self, pair):
+        try:
+            # Fetch Candles (1 min timeframe = 60s)
+            candles = self.api.get_candles(pair, 60, 100, time.time())
+            
+            if not candles or len(candles) < 60:
+                return None, "Not enough candles"
                 
             # Convert to numpy arrays
             close_prices = np.array([c['close'] for c in candles], dtype=float)
@@ -283,14 +463,14 @@ class IQBot:
             ema_dist = abs(c_ema20 - c_ema50)
             min_dist = c_close * 0.00005 
             if ema_dist < min_dist:
-                return None
+                return None, f"Low EMA Dist ({ema_dist:.5f}<{min_dist:.5f})"
             
             if not is_uptrend and not is_downtrend:
-                return None
+                return None, f"No Trend (RSI={c_rsi:.1f})"
                 
             # RSI Filter (45-55 NO TRADE)
             if 45 <= c_rsi <= 55:
-                return None
+                return None, f"RSI Neutral ({c_rsi:.1f})"
 
             # Volatility Check
             last_bodies = np.abs(close_prices[-12:-2] - open_prices[-12:-2])
@@ -300,17 +480,17 @@ class IQBot:
             
             # Low Volatility (Doji/Small)
             if c_body_size < avg_body * 0.2:
-                return None
+                return None, "Low Volatility (Doji)"
                 
             # Impulse Candle (Huge) -> Avoid Exhaustion
             if c_body_size > avg_body * 3.0:
-                return None
+                return None, "High Volatility (Impulse)"
 
             # CALL SCENARIO
             if is_uptrend:
                 is_bullish = c_close > c_open
                 if not is_bullish: 
-                    return None
+                    return None, "Uptrend but Bearish Candle"
                 
                 touched_zone = False
                 
@@ -323,7 +503,7 @@ class IQBot:
                         touched_zone = True
                         
                 if not touched_zone:
-                    return None
+                    return None, "Uptrend but No Pullback"
                     
                 # Confirmation types
                 is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
@@ -332,13 +512,15 @@ class IQBot:
                 is_rejection = lower_wick > c_body_size * 0.5
                 
                 if is_engulfing or is_strong or is_rejection:
-                    return "call"
+                    return "call", f"CALL Signal (RSI={c_rsi:.1f})"
+                
+                return None, "Uptrend but Weak Candle"
 
             # PUT SCENARIO
             elif is_downtrend:
                 is_bearish = c_close < c_open
                 if not is_bearish: 
-                    return None
+                    return None, "Downtrend but Bullish Candle"
                 
                 touched_zone = False
                 
@@ -351,7 +533,7 @@ class IQBot:
                         touched_zone = True
                         
                 if not touched_zone:
-                    return None
+                    return None, "Downtrend but No Pullback"
                     
                 # Confirmation types
                 is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
@@ -360,13 +542,15 @@ class IQBot:
                 is_rejection = upper_wick > c_body_size * 0.5
                 
                 if is_engulfing or is_strong or is_rejection:
-                    return "put"
+                    return "put", f"PUT Signal (RSI={c_rsi:.1f})"
                     
-            return None
+                return None, "Downtrend but Weak Candle"
+                    
+            return None, "Unknown State"
             
         except Exception as e:
             print(f"Error in analysis: {e}")
-            return None
+            return None, f"Error: {e}"
 
     def _check_trade_result(self, order_id, duration=None):
         try:
@@ -440,6 +624,7 @@ class IQBot:
             self.trade_in_progress = False
 
     def stop(self):
+        self.add_log("Stopping bot...")
         self.is_running = False
         return True, "Bot stopped"
 

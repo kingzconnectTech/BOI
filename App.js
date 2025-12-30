@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch, Dimensions, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Platform, Switch, Dimensions, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import axios from 'axios';
@@ -12,7 +12,8 @@ import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // Backend URL
-const API_URL = 'https://boi-lgdy.onrender.com'; 
+const API_URL = 'http://192.168.43.76:8000'; 
+// const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({
@@ -38,20 +39,23 @@ export default function App() {
   const [password, setPassword] = useState(''); // IQ Option Password
   const [mode, setMode] = useState('PRACTICE'); // PRACTICE or REAL
   const [amount, setAmount] = useState('1');
-  const [duration, setDuration] = useState('1');
-  const [stopLoss, setStopLoss] = useState('1');
+  const [duration, setDuration] = useState('2');
+  const [stopLoss, setStopLoss] = useState('2');
   const [takeProfit, setTakeProfit] = useState('5');
   const [maxConsecutiveLosses, setMaxConsecutiveLosses] = useState('2');
-  const [maxTrades, setMaxTrades] = useState('0'); // 0 = unlimited
+  const [maxTrades, setMaxTrades] = useState('4'); // 0 = unlimited
   const [autoTrading, setAutoTrading] = useState(true);
   const [currency, setCurrency] = useState('$'); // Default to $
+  const [strategy, setStrategy] = useState('Momentum'); // Momentum, RSI Reversal
   const [stats, setStats] = useState({ profit: 0, wins: 0, losses: 0, win_rate: 0 });
+  const [signals, setSignals] = useState([]); // Simulated signals
   const [backendStatus, setBackendStatus] = useState('Checking...');
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [expoPushToken, setExpoPushToken] = useState('');
   const [nextTradingTime, setNextTradingTime] = useState(null); // New state for market status
   const [isLoading, setIsLoading] = useState(false);
+  const [showAdvice, setShowAdvice] = useState(false);
 
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
@@ -97,8 +101,9 @@ export default function App() {
           // Get Stats (Status)
           const statusResponse = await axios.get(`${API_URL}/status?email=${email}`);
           if (statusResponse.data) {
-            setStats(statusResponse.data.stats);
+            setStats(statusResponse.data.stats || { profit: 0, wins: 0, losses: 0, win_rate: 0 });
             setIsRunning(statusResponse.data.running);
+            setSignals(statusResponse.data.signals || []);
             if (statusResponse.data.currency) {
                 setCurrency(statusResponse.data.currency);
             }
@@ -245,7 +250,8 @@ export default function App() {
         max_consecutive_losses: parseInt(maxConsecutiveLosses) || 0,
         max_trades: parseInt(maxTrades) || 0,
         auto_trading: autoTrading,
-        push_token: expoPushToken 
+        push_token: expoPushToken,
+        strategy: strategy
       }, { timeout: 60000 }); // 60s timeout
       
       if (response.data.status === 'started') {
@@ -258,6 +264,22 @@ export default function App() {
       const errorMsg = error.response?.data?.detail || error.message;
       alert(`Connect/Start Failed: ${errorMsg}`);
       addLog(`Start Failed: ${errorMsg}`);
+    }
+  };
+
+  const handleUpdateStrategy = async (newStrategy) => {
+    setStrategy(newStrategy);
+    if (isRunning) {
+        try {
+            addLog(`Updating strategy to ${newStrategy}...`);
+            await axios.post(`${API_URL}/update`, {
+                email: email,
+                strategy: newStrategy
+            });
+            addLog(`Strategy updated to ${newStrategy}`);
+        } catch (error) {
+            addLog(`Error updating strategy: ${error.message}`);
+        }
     }
   };
 
@@ -482,6 +504,9 @@ export default function App() {
                 <Text style={{color: '#64748b', fontSize: 10, marginTop: 2}}>Runs in background</Text>
              </View>
              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                 <TouchableOpacity onPress={() => setShowAdvice(true)} style={[styles.logoutButton, {marginRight: 10, borderColor: '#3b82f6'}]}>
+                     <MaterialCommunityIcons name="lightbulb-on-outline" size={20} color="#3b82f6" />
+                 </TouchableOpacity>
                  <TouchableOpacity onPress={handleBotDisconnect} style={[styles.logoutButton, {marginRight: 10}]}>
                      <MaterialCommunityIcons name="power" size={20} color="#f59e0b" />
                  </TouchableOpacity>
@@ -491,6 +516,74 @@ export default function App() {
              </View>
         </View>
         
+        {/* Advice Modal */}
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={showAdvice}
+            onRequestClose={() => setShowAdvice(false)}
+        >
+            <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20}}>
+                <View style={{backgroundColor: '#1e293b', borderRadius: 16, padding: 20, maxHeight: '80%', borderWidth: 1, borderColor: '#334155'}}>
+                    <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+                        <Text style={{color: '#fff', fontSize: 20, fontWeight: 'bold'}}>Trading Advice</Text>
+                        <TouchableOpacity onPress={() => setShowAdvice(false)}>
+                            <MaterialCommunityIcons name="close" size={24} color="#94a3b8" />
+                        </TouchableOpacity>
+                    </View>
+                    <ScrollView indicatorStyle="white">
+                        <Text style={{color: '#e2e8f0', fontSize: 16, marginBottom: 10, fontWeight: 'bold'}}>Daily Trading Schedule</Text>
+                        
+                        <Text style={{color: '#10b981', fontSize: 14, fontWeight: 'bold', marginTop: 10}}>🟢 Best Session #1: London Session</Text>
+                        <Text style={{color: '#94a3b8', fontSize: 13, marginBottom: 4}}>09:00 AM – 12:00 PM</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        • Why: Clean candle structure, lowest manipulation on OTC.{'\n'}
+                        • What to trade: EMA Trend Pullback, Support & Resistance Rejection.{'\n'}
+                        • How: Take 2–3 quality trades only. Avoid first 10 mins (09:00–09:10).
+                        </Text>
+
+                        <Text style={{color: '#f59e0b', fontSize: 14, fontWeight: 'bold', marginTop: 15}}>🟡 Best Session #2: New York Session</Text>
+                        <Text style={{color: '#94a3b8', fontSize: 13, marginBottom: 4}}>02:30 PM – 05:30 PM</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        • Why: Strong momentum, larger candles.{'\n'}
+                        • Caution: Higher volatility. Avoid major news.{'\n'}
+                        • What to trade: RSI + Candle Confirmation, Trend continuation.{'\n'}
+                        • Tip: Stop after 2 losses.
+                        </Text>
+
+                        <Text style={{color: '#10b981', fontSize: 14, fontWeight: 'bold', marginTop: 15}}>🟢 Best Session #3: OTC Golden Hours (Highly Recommended)</Text>
+                        <Text style={{color: '#94a3b8', fontSize: 13, marginBottom: 4}}>07:00 PM – 10:00 PM</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        • Why: Most stable OTC behavior, fewer fake breakouts.{'\n'}
+                        • What to trade: S&R Rejection, EMA pullbacks.{'\n'}
+                        • Setup: 1-min chart, 2-min expiry. Max 3 trades.
+                        </Text>
+
+                        <Text style={{color: '#ef4444', fontSize: 14, fontWeight: 'bold', marginTop: 15}}>❌ Sessions to Avoid</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        • 01:00 AM – 06:00 AM: Random movements.{'\n'}
+                        • After 10:30 PM: OTC becomes unstable, sudden spikes.
+                        </Text>
+
+                        <Text style={{color: '#e2e8f0', fontSize: 16, marginTop: 20, marginBottom: 10, fontWeight: 'bold'}}>Recommended Routine</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        • Option A (Conservative): 7:00 – 9:00 PM{'\n'}
+                        • Option B (Active): 9:30 – 10:30 AM & 7:30 – 9:00 PM
+                        </Text>
+
+                        <Text style={{color: '#e2e8f0', fontSize: 16, marginTop: 20, marginBottom: 10, fontWeight: 'bold'}}>Golden Rules</Text>
+                        <Text style={{color: '#cbd5e1', fontSize: 14, lineHeight: 22}}>
+                        1. Max 5 trades per day.{'\n'}
+                        2. Stop after 2 consecutive losses.{'\n'}
+                        3. No martingale on 2-minute trades.{'\n'}
+                        4. Trade only when candles are clean.
+                        </Text>
+                        <View style={{height: 20}} />
+                    </ScrollView>
+                </View>
+            </View>
+        </Modal>
+
         {/* Market Closed Warning */}
         {nextTradingTime && (
             <View style={styles.warningCard}>
@@ -504,6 +597,35 @@ export default function App() {
                 </TouchableOpacity>
             </View>
         )}
+
+        {/* Strategy Selector */}
+        <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>STRATEGY</Text>
+            <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingRight: 20 }}
+            >
+                <TouchableOpacity 
+                    style={[styles.strategyOption, strategy === 'Momentum' && styles.strategyOptionActive]}
+                    onPress={() => handleUpdateStrategy('Momentum')}
+                >
+                    <Text style={[styles.strategyText, strategy === 'Momentum' && styles.strategyTextActive]}>Momentum</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={[styles.strategyOption, strategy === 'RSI Reversal' && styles.strategyOptionActive]}
+                    onPress={() => handleUpdateStrategy('RSI Reversal')}
+                >
+                    <Text style={[styles.strategyText, strategy === 'RSI Reversal' && styles.strategyTextActive]}>RSI Reversal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={[styles.strategyOption, strategy === 'EMA Trend Pullback' && styles.strategyOptionActive]}
+                    onPress={() => handleUpdateStrategy('EMA Trend Pullback')}
+                >
+                    <Text style={[styles.strategyText, strategy === 'EMA Trend Pullback' && styles.strategyTextActive]}>EMA Trend</Text>
+                </TouchableOpacity>
+            </ScrollView>
+        </View>
         
         {/* Stats Dashboard */}
         <View style={styles.dashboardContainer}>
@@ -637,6 +759,41 @@ export default function App() {
           </Text>
         </TouchableOpacity>
 
+        {/* Signal History (Visible when Auto Trading is OFF or always if you prefer) */}
+        {!autoTrading && signals.length > 0 && (
+          <View style={styles.logsSection}>
+            <View style={styles.logsHeader}>
+               <MaterialCommunityIcons name="history" size={16} color="#94a3b8" />
+               <Text style={styles.logsTitle}>SIGNAL HISTORY (SIMULATION)</Text>
+            </View>
+            <View style={styles.signalTable}>
+               <View style={styles.signalHeaderRow}>
+                <Text style={[styles.signalHeaderCell, {flex: 2}]}>PAIR</Text>
+                <Text style={[styles.signalHeaderCell, {flex: 1}]}>DIR</Text>
+                <Text style={[styles.signalHeaderCell, {flex: 2}]}>ENTRY</Text>
+                <Text style={[styles.signalHeaderCell, {flex: 2}]}>RESULT</Text>
+              </View>
+              <ScrollView style={{ flex: 1 }} nestedScrollEnabled={true}>
+              {signals.map((sig) => (
+                <View key={sig.id} style={styles.signalRow}>
+                  <Text style={[styles.signalCell, {flex: 2, color: '#fff'}]}>
+                    {sig.pair.replace('-OTC', '')}
+                    <Text style={{fontSize: 10, color: '#64748b'}}>{'\n'}{sig.time}</Text>
+                  </Text>
+                  <Text style={[styles.signalCell, {flex: 1, color: sig.direction === 'call' ? '#10b981' : '#ef4444'}]}>
+                    {sig.direction === 'call' ? '▲' : '▼'}
+                  </Text>
+                  <Text style={[styles.signalCell, {flex: 2, color: '#94a3b8'}]}>{sig.entry}</Text>
+                  <Text style={[styles.signalCell, {flex: 2, fontWeight: 'bold', color: sig.status === 'WIN' ? '#10b981' : sig.status === 'LOSS' ? '#ef4444' : '#fbbf24'}]}>
+                    {sig.status}
+                  </Text>
+                </View>
+              ))}
+              </ScrollView>
+           </View>
+          </View>
+        )}
+
         {/* System Logs */}
         <View style={styles.logsSection}>
           <View style={styles.logsHeader}>
@@ -718,6 +875,30 @@ const styles = StyleSheet.create({
       fontWeight: 'bold',
       fontSize: 16,
       letterSpacing: 1,
+  },
+  strategyOption: {
+    width: 140,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1e293b',
+  },
+  strategyOptionActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: '#3b82f6',
+  },
+  strategyText: {
+    color: '#94a3b8',
+    fontWeight: '600',
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  strategyTextActive: {
+    color: '#fff',
   },
   backendStatus: {
       marginTop: 20,
@@ -842,11 +1023,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   statCard: {
-    flex: 1,
+    width: '31%',
     backgroundColor: '#1e293b', // Slate 800
     padding: 12,
     borderRadius: 12,
-    marginHorizontal: 4,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#334155',
@@ -872,19 +1052,17 @@ const styles = StyleSheet.create({
 
   // Section
   sectionContainer: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 20,
+    paddingHorizontal: 24,
     marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#334155',
   },
   sectionTitle: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 16,
+    fontWeight: 'bold',
     letterSpacing: 1,
+    marginBottom: 10,
+  },
+  card: {
   },
 
   // Mode Selector
@@ -1029,6 +1207,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
     height: 300,
+    marginBottom: 24,
+    overflow: 'hidden', // Ensure content stays inside
   },
   logsHeader: {
     flexDirection: 'row',
@@ -1063,5 +1243,35 @@ const styles = StyleSheet.create({
   logContent: {
     color: '#cbd5e1',
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+
+  // Signal Table
+  signalTable: {
+    marginTop: 8,
+    flex: 1, // Take remaining space
+  },
+  signalHeaderRow: {
+    flexDirection: 'row',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    marginBottom: 8,
+  },
+  signalHeaderCell: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  signalRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b', // darker separator
+    alignItems: 'center',
+  },
+  signalCell: {
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

@@ -58,13 +58,29 @@ def run_bot_process(email, password, mode, shared_dict, command_queue):
                             c.get('take_profit', 0),
                             c.get('max_consecutive_losses', 0),
                             c.get('max_trades', 0),
-                            c.get('auto_trading', True)
+                            c.get('auto_trading', True),
+                            c.get('strategy', 'Momentum')
                         )
                     if 'push_token' in cmd:
                         bot.set_push_token(cmd['push_token'])
                         
                     bot.start_trading()
-                    
+
+                elif cmd['type'] == 'UPDATE':
+                    if 'config' in cmd:
+                        c = cmd['config']
+                        bot.set_config(
+                            c.get('amount', bot.trade_amount),
+                            c.get('duration', bot.trade_duration),
+                            c.get('stop_loss', bot.stop_loss),
+                            c.get('take_profit', bot.take_profit),
+                            c.get('max_consecutive_losses', bot.max_consecutive_losses),
+                            c.get('max_trades', bot.max_trades),
+                            c.get('auto_trading', bot.auto_trading),
+                            c.get('strategy', bot.strategy)
+                        )
+                        bot.add_log(f"Config updated. Strategy: {bot.strategy}")
+
                 elif cmd['type'] == 'DISCONNECT':
                     bot.disconnect()
                     shared_dict['connected'] = False
@@ -79,6 +95,7 @@ def run_bot_process(email, password, mode, shared_dict, command_queue):
             shared_dict['min_amount'] = bot.trade_amount
             shared_dict['next_trading_time'] = bot.next_trading_time
             shared_dict['logs'] = bot.get_logs()
+            shared_dict['signals'] = bot.get_signals()
             
             win_rate = 0
             if bot.trades_taken > 0:
@@ -160,30 +177,38 @@ class IsolatedBot:
                 
         return False, "Connection timeout"
 
-    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True):
-        # Config is sent with START command usually, but we can store it or send update
-        pass 
+    def set_config(self, amount, duration, stop_loss, take_profit, max_consecutive_losses, max_trades, auto_trading=True, strategy="Momentum"):
+        self.config = {
+            'amount': amount,
+            'duration': duration,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'max_consecutive_losses': max_consecutive_losses,
+            'max_trades': max_trades,
+            'auto_trading': auto_trading,
+            'strategy': strategy
+        }
 
     def set_push_token(self, token):
-        # Will be sent with start
         self.push_token = token
 
     def start_trading(self):
-        # We need to pass the config here because set_config was called on this wrapper, 
-        # but the process doesn't know about it yet unless we stored it.
-        # However, main.py calls set_config then start_trading.
-        # To simplify, we assume main.py calls set_config then start.
-        # Let's actually store config in this wrapper to pass it.
+        self.command_queue.put({
+            'type': 'START',
+            'config': getattr(self, 'config', {}),
+            'push_token': getattr(self, 'push_token', None)
+        })
+
+    def update_config(self, config):
+        # Merge with existing config
+        if not hasattr(self, 'config'):
+            self.config = {}
+        self.config.update(config)
         
-        # NOTE: Since main.py calls set_config separately, we need to capture those values.
-        # But this wrapper doesn't have them. 
-        # Refactoring main.py to pass config in start would be better, but we want to minimize main.py changes.
-        # So we will rely on the fact that main.py logic is:
-        # bot.set_config(...)
-        # bot.start_trading()
-        
-        # We need to implement set_config to store values locally, then send them.
-        pass
+        self.command_queue.put({
+            'type': 'UPDATE',
+            'config': config
+        })
 
     def stop(self):
         self.command_queue.put({'type': 'STOP'})
@@ -205,7 +230,8 @@ class IsolatedBot:
             "balance": self.shared_dict.get('balance', 0),
             "currency": self.shared_dict.get('currency', ""),
             "email": self.email,
-            "stats": self.shared_dict.get('stats', {})
+            "stats": self.shared_dict.get('stats', {}),
+            "signals": self.shared_dict.get('signals', [])
         }
 
     def get_logs(self):
@@ -214,28 +240,7 @@ class IsolatedBot:
     def clear_logs(self):
         self.shared_dict['logs'] = []
         
-    # Proxy methods to match IQBot interface
-    def set_config(self, *args, **kwargs):
-        self.pending_config = {
-            'amount': args[0],
-            'duration': args[1],
-            'stop_loss': args[2],
-            'take_profit': args[3],
-            'max_consecutive_losses': args[4],
-            'max_trades': args[5],
-            'auto_trading': kwargs.get('auto_trading', True)
-        }
 
-    def set_push_token(self, token):
-        self.pending_push_token = token
-        
-    def start_trading(self):
-        cmd = {
-            'type': 'START',
-            'config': getattr(self, 'pending_config', {}),
-            'push_token': getattr(self, 'pending_push_token', None)
-        }
-        self.command_queue.put(cmd)
 
 
 # ============================================================================
