@@ -113,22 +113,30 @@ class IQBot:
         self.password = password
         
         # 1. Initialize API
-        # We use a global lock here just in case the library has thread-safety issues during init
-        with bot_manager.lock:
-            # CRITICAL: Remove any existing session file to prevent reusing old credentials
-            self._clear_session_file()
-            
-            self.api = IQ_Option(email, password)
-            
-            # Clear logs and stats on new connection to prevent data leak
-            self.clear_logs() 
-            self.reset_stats()
-            
-            # Attempt connection
-            check, reason = self.api.connect()
+        try:
+            # We use a global lock here just in case the library has thread-safety issues during init
+            with bot_manager.lock:
+                # CRITICAL: Remove any existing session file to prevent reusing old credentials
+                self._clear_session_file()
+                
+                print(f"Initializing IQ_Option for {email}")
+                self.api = IQ_Option(email, password)
+                
+                # Clear logs and stats on new connection to prevent data leak
+                self.clear_logs() 
+                self.reset_stats()
+                
+                # Attempt connection
+                print("Connecting to IQ Option API...")
+                check, reason = self.api.connect()
+        except Exception as e:
+            print(f"CRITICAL ERROR during connection initialization: {e}")
+            traceback.print_exc()
+            return False, f"Internal Error during connection: {str(e)}"
         
         if check:
             self.connected = True
+            print("API Connected. Verifying identity...")
             
             # 2. Identity Verification
             # We must verify that the connected account matches the requested email
@@ -136,30 +144,33 @@ class IQBot:
                 # Wait for profile data to be populated (timeout 10s)
                 # In iqoptionapi, profile is usually in self.api.profile.msg
                 profile_email = None
-                for _ in range(20): # 10 seconds wait
+                
+                # Force a profile update request
+                self.api.get_profile_ansyc()
+                
+                for i in range(20): # 10 seconds wait
                      if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
-                         profile_email = self.api.profile.msg.get('email')
+                         # Depending on library version, msg might be the dict or msg['result']
+                         msg = self.api.profile.msg
+                         if isinstance(msg, dict):
+                             profile_email = msg.get('email')
+                         
                          if profile_email:
+                             print(f"Profile email found: {profile_email}")
                              break
                      time.sleep(0.5)
                 
-                # If we couldn't get it via property, try get_profile_ansyc
-                if not profile_email:
-                     self.api.get_profile_ansyc()
-                     time.sleep(2)
-                     if hasattr(self.api, 'profile') and self.api.profile and hasattr(self.api.profile, 'msg') and self.api.profile.msg:
-                         profile_email = self.api.profile.msg.get('email')
-
                 # STRICT EMAIL CHECK
                 if profile_email:
                     if profile_email.lower().strip() != email.lower().strip():
                         self.add_log(f"CRITICAL: Session mismatch! Requested {email}, but connected to {profile_email}. Disconnecting.")
-                        self.disconnect() # This now also calls _clear_session_file
-                        return False, "Session Error: Connected to wrong account. Please try again."
+                        self.disconnect() 
+                        return False, f"Session Error: Connected to {profile_email} instead of {email}."
                 else:
-                    self.add_log("Error: Could not verify connected email. Aborting connection for safety.")
+                    # If we can't verify, we MUST fail for safety
+                    self.add_log("Error: Could not verify connected email (Timeout).")
                     self.disconnect()
-                    return False, "Connection Error: Could not verify account identity. Please try again."
+                    return False, "Connection Error: Could not verify account identity (Timeout). Try again."
 
                 # Check balance to ensure it's fresh
                 self.api.change_balance(mode)
@@ -168,9 +179,14 @@ class IQBot:
                 self.currency = self.api.get_currency()
                 
             except Exception as e:
-                print(f"Profile/Balance check warning: {e}")
+                print(f"Profile/Balance check error: {e}")
+                traceback.print_exc()
+                self.disconnect()
+                return False, f"Error verifying account: {str(e)}"
 
             self.update_balance()
+            self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
+            return True, f"Connected successfully ({mode})"
             self.add_log(f"Connected to {email} ({mode}). Balance: {self.currency}{self.balance}")
             return True, f"Connected successfully ({mode})"
         else:
