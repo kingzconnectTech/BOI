@@ -76,17 +76,25 @@ def read_root():
 
 @app.post("/connect")
 def connect_bot(data: ConnectRequest):
-    bot = bot_manager.get_bot(data.email)
-    success, message = bot.connect(data.email, data.password, data.mode)
-    if not success:
-        # If connection fails, remove the bot to prevent zombie instances
-        bot_manager.remove_bot(data.email)
-        raise HTTPException(status_code=400, detail=message)
-    
-    return {"status": "connected", "message": message, "data": bot.get_status()}
+    try:
+        success, message = bot_manager.connect_bot(data.email, data.password, data.mode)
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        bot = bot_manager.get_bot(data.email)
+        return {"status": "connected", "message": message, "data": bot.get_status()}
+    except Exception as e:
+         print(f"Error connecting: {e}")
+         # traceback.print_exc()
+         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/start")
 def start_bot(login_data: LoginRequest):
+    # Use bot_manager to connect (handles locking and creation)
+    success, message = bot_manager.connect_bot(login_data.email, login_data.password, login_data.mode)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
     bot = bot_manager.get_bot(login_data.email)
     bot.clear_logs() # Clear previous logs
     
@@ -104,10 +112,6 @@ def start_bot(login_data: LoginRequest):
     # Set Push Token
     if login_data.push_token:
         bot.set_push_token(login_data.push_token)
-    
-    success, message = bot.connect(login_data.email, login_data.password, login_data.mode)
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
     
     # Start auto trading loop
     bot.start_trading()

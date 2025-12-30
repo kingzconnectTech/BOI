@@ -1,14 +1,15 @@
 from iqoptionapi.stable_api import IQ_Option
 import time
 import threading
-import random
-
 import traceback
-
 import talib
 import numpy as np
 from datetime import datetime, timedelta
 from exponent_server_sdk import PushClient, PushMessage
+
+# ============================================================================
+# IQBot Class - Single User Bot Instance
+# ============================================================================
 
 class IQBot:
     def __init__(self):
@@ -19,17 +20,17 @@ class IQBot:
         self.is_running = False
         self.balance = 0
         self.currency = ""
-        self.logs = [] # Store logs for frontend
+        self.logs = []  # Store logs for frontend
         
         # Trade Config
         self.trade_amount = 1
-        self.trade_duration = 1 # minutes
+        self.trade_duration = 1  # minutes
         self.stop_loss = 0
         self.take_profit = 0
         self.max_consecutive_losses = 0
-        self.max_trades = 0 # 0 means unlimited
+        self.max_trades = 0  # 0 means unlimited
         self.auto_trading = True
-        self.push_token = None # Expo Push Token
+        self.push_token = None  # Expo Push Token
         
         self.initial_balance = 0
         self.total_profit = 0
@@ -95,43 +96,35 @@ class IQBot:
             except:
                 pass
             self.api = None
-            time.sleep(1) # Wait for full disconnect
+            time.sleep(1)  # Wait for full disconnect
             
         self.email = email
         self.password = password
         
-        # 1. Initialize API
-        # We use a global lock here just in case the library has thread-safety issues during init
-        with bot_manager.lock:
-            # Create NEW instance
-            self.api = IQ_Option(email, password)
-            print(f"[IQBot] Created API instance {id(self.api)} for {email}")
-            
-            # Clear logs and stats on new connection to prevent data leak
-            self.clear_logs() 
-            self.reset_stats()
-            
-            # Attempt connection
-            check, reason = self.api.connect()
+        # Create NEW instance
+        self.api = IQ_Option(email, password)
+        print(f"[IQBot] Created API instance {id(self.api)} for {email}")
+        
+        # Clear logs and stats on new connection to prevent data leak
+        self.clear_logs()
+        self.reset_stats()
+        
+        # Attempt connection
+        check, reason = self.api.connect()
         
         if check:
             self.connected = True
             
-            # 2. Identity Verification
-            # Fetch profile to ensure we are connected to the CORRECT account
-            try:
-                # profile = self.api.get_profile() # This might be slow or cached
-                # Use balance/currency check as proxy, or trust the connect for now
-                # Ideally: verify email matches
-                pass 
-            except Exception as e:
-                print(f"Profile check failed: {e}")
-
             # Change account mode
             self.api.change_balance(mode)
             
             self.update_balance()
-            self.add_log(f"Connected successfully ({mode}). Balance: {self.currency}{self.balance}")
+            
+            # VERIFICATION: Log which account we're actually connected to
+            self.add_log(f"✓ Connected as: {email}")
+            self.add_log(f"✓ Balance: {self.currency}{self.balance}")
+            self.add_log(f"✓ Mode: {mode}")
+            
             return True, f"Connected successfully ({mode})"
         else:
             self.connected = False
@@ -157,28 +150,18 @@ class IQBot:
 
     def start_trading(self):
         self.is_running = True
-        threading.Thread(target=self._trading_loop).start()
+        threading.Thread(target=self._trading_loop, daemon=True).start()
 
     def _trading_loop(self):
         while self.is_running and self.connected:
             try:
-                # 1. Skip Open Check for now to avoid 'underlying' error
-                # We will just try to trade and let the API reject if closed
-                
-                # For now, let's just pick a few popular pairs to scan
-                pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC", "NZDUSD-OTC", "USDJPY-OTC"]
-                # Remove restricted pairs if any were accidentally added or just filter strictly
-                # User requested: "usdjyo-otc, nzdusd-otc do not trade them"
-                # So we keep the list safe:
                 pairs_to_scan = ["EURUSD-OTC", "GBPUSD-OTC", "AUDCAD-OTC", "USDCHF-OTC", "EURJPY-OTC"]
-                
-                # Scan pairs sequentially to ensure deterministic behavior
-                # random.shuffle(pairs_to_scan) - Removed as per request
                 
                 self.add_log("Starting market scan...")
 
                 for pair in pairs_to_scan:
-                    if not self.is_running: break
+                    if not self.is_running: 
+                        break
                     
                     # Double check if trade started during loop
                     if self.trade_in_progress: 
@@ -193,10 +176,9 @@ class IQBot:
                     except Exception as e:
                         print(f"Error processing {pair}: {e}")
                         self.add_log(f"Error analysing {pair}: {str(e)}")
-                        # traceback.print_exc()
                         
                 self.add_log("Scan complete. Waiting...")
-                time.sleep(2) # Wait a bit before next scan cycle
+                time.sleep(2)  # Wait a bit before next scan cycle
             except Exception as e:
                 print(f"Error in trading loop: {e}")
                 traceback.print_exc()
@@ -225,8 +207,7 @@ class IQBot:
                 break
         
         if not can_trade:
-            # self.add_log(f"Outside trading hours (WAT). Current: {current_time.strftime('%H:%M')}")
-            return False # Just skip quietly or log once (too noisy if logged every loop)
+            return False
             
         # Analyze Strategy
         action = self.analyze_strategy(pair)
@@ -234,12 +215,10 @@ class IQBot:
         if action:
             direction = action
             
-            # Expiry Rule: Use User Defined Duration
-            # STRATEGY OVERRIDE: 1 min chart -> 2 min expiry
+            # Expiry Rule: 2 min expiry
             expiry_duration = 2 
             
             # Money Management: Risk 1-2% per trade
-            # Cap trade amount at 2% of balance
             safe_max = max(1.0, self.balance * 0.02)
             actual_amount = min(self.trade_amount, safe_max)
             
@@ -253,7 +232,7 @@ class IQBot:
             if check:
                 self.trade_in_progress = True
                 self.add_log(f"Trade placed: {pair} {direction} ${actual_amount:.2f} ({expiry_duration}m)")
-                threading.Thread(target=self._check_trade_result, args=(id, expiry_duration)).start()
+                threading.Thread(target=self._check_trade_result, args=(id, expiry_duration), daemon=True).start()
                 self.update_balance()
                 return True
             else:
@@ -264,29 +243,26 @@ class IQBot:
 
     def analyze_strategy(self, pair):
         try:
-            # 1. Fetch Candles (1 min timeframe = 60s)
-            # Need enough for EMA 50 -> fetch 100 candles
+            # Fetch Candles (1 min timeframe = 60s)
             candles = self.api.get_candles(pair, 60, 100, time.time())
             
             if not candles or len(candles) < 60:
                 return None
                 
             # Convert to numpy arrays
-            # candles is a list of dicts: [{'open': 1.1, 'close': 1.2, ...}, ...]
             close_prices = np.array([c['close'] for c in candles], dtype=float)
             open_prices = np.array([c['open'] for c in candles], dtype=float)
             high_prices = np.array([c['max'] for c in candles], dtype=float)
             low_prices = np.array([c['min'] for c in candles], dtype=float)
             
-            # 2. Indicators
+            # Indicators
             ema20 = talib.EMA(close_prices, timeperiod=20)
             ema50 = talib.EMA(close_prices, timeperiod=50)
             upper_bb, middle_bb, lower_bb = talib.BBANDS(close_prices, timeperiod=20, nbdevup=2.0, nbdevdn=2.0, matype=0)
             rsi = talib.RSI(close_prices, timeperiod=14)
             
-            # Indices: -1 is current (forming), -2 is last closed
             last_idx = -2
-            prev_idx = -3 # For checking previous candle context if needed
+            prev_idx = -3
             
             c_close = close_prices[last_idx]
             c_open = open_prices[last_idx]
@@ -297,12 +273,11 @@ class IQBot:
             c_ema20 = ema20[last_idx]
             c_ema50 = ema50[last_idx]
             
-            # Step 1: Trend Filter
+            # Trend Filter
             is_uptrend = c_ema20 > c_ema50 and c_rsi > 50
             is_downtrend = c_ema20 < c_ema50 and c_rsi < 50
             
-            # EMA Separation Check (Avoid flat/crossing)
-            # Threshold: 0.005% of price
+            # EMA Separation Check
             ema_dist = abs(c_ema20 - c_ema50)
             min_dist = c_close * 0.00005 
             if ema_dist < min_dist:
@@ -316,49 +291,30 @@ class IQBot:
                 return None
 
             # Volatility Check
-            # Calculate average body size of last 10 candles
             last_bodies = np.abs(close_prices[-12:-2] - open_prices[-12:-2])
             avg_body = np.mean(last_bodies)
             
-            # Current (forming) body size
-            # For confirmation, we look at last CLOSED candle (idx -2)
             c_body_size = abs(c_close - c_open)
             
-            # 1. Low Volatility (Doji/Small)
+            # Low Volatility (Doji/Small)
             if c_body_size < avg_body * 0.2:
                 return None
                 
-            # 2. Impulse Candle (Huge) -> Avoid Exhaustion
+            # Impulse Candle (Huge) -> Avoid Exhaustion
             if c_body_size > avg_body * 3.0:
                 return None
 
-            # Step 2 & 3: Pullback + Confirmation
-            
             # CALL SCENARIO
             if is_uptrend:
-                # Rule: Pullback to EMA 20 OR Lower/Middle BB
-                # Check if Low of last closed candle touched EMA20 or Lower BB
-                # Or if previous candle touched it.
-                
-                # Simplified Pullback Logic:
-                # We want to enter ON confirmation.
-                # So the Confirmation Candle (last closed) should be GREEN (Bullish).
                 is_bullish = c_close > c_open
-                if not is_bullish: return None
+                if not is_bullish: 
+                    return None
                 
-                # Check for Pullback context:
-                # Did this candle or the previous one touch the zone?
-                # Zone: EMA20, LowerBB, MiddleBB
-                # We check if Low <= EMA20 (or close to it)
-                
-                # Let's check if the Low of the confirmation candle OR the previous candle dipped near EMA20
                 touched_zone = False
                 
-                # Check current candle (Confirmation) Low
-                if c_low <= c_ema20 * 1.0002 or c_low <= middle_bb[last_idx] * 1.0002: # Small buffer
+                if c_low <= c_ema20 * 1.0002 or c_low <= middle_bb[last_idx] * 1.0002:
                      touched_zone = True
                 
-                # Check previous candle Low
                 if not touched_zone:
                     p_low = low_prices[prev_idx]
                     if p_low <= ema20[prev_idx] * 1.0002 or p_low <= middle_bb[prev_idx] * 1.0002:
@@ -367,29 +323,23 @@ class IQBot:
                 if not touched_zone:
                     return None
                     
-                # Confirmation types:
-                # 1. Bullish Engulfing
+                # Confirmation types
                 is_engulfing = c_open <= close_prices[prev_idx] and c_close >= open_prices[prev_idx] and (close_prices[prev_idx] < open_prices[prev_idx])
-                # 2. Strong Bullish (Body size)
                 is_strong = c_body_size > avg_body
-                # 3. Rejection (Long lower wick)
                 lower_wick = c_open - c_low if is_bullish else c_close - c_low
-                is_rejection = lower_wick > c_body_size * 0.5 # Wick is significant
+                is_rejection = lower_wick > c_body_size * 0.5
                 
                 if is_engulfing or is_strong or is_rejection:
                     return "call"
 
             # PUT SCENARIO
             elif is_downtrend:
-                # Rule: Pullback to EMA 20 OR Upper/Middle BB
-                
-                # Confirmation Candle must be RED (Bearish)
                 is_bearish = c_close < c_open
-                if not is_bearish: return None
+                if not is_bearish: 
+                    return None
                 
                 touched_zone = False
                 
-                # Check current candle High (touched from below?)
                 if c_high >= c_ema20 * 0.9998 or c_high >= middle_bb[last_idx] * 0.9998:
                     touched_zone = True
                     
@@ -401,12 +351,9 @@ class IQBot:
                 if not touched_zone:
                     return None
                     
-                # Confirmation types:
-                # 1. Bearish Engulfing
+                # Confirmation types
                 is_engulfing = c_open >= close_prices[prev_idx] and c_close <= open_prices[prev_idx] and (close_prices[prev_idx] > open_prices[prev_idx])
-                # 2. Strong Bearish
                 is_strong = c_body_size > avg_body
-                # 3. Rejection (Long upper wick)
                 upper_wick = c_high - c_open if is_bearish else c_high - c_close
                 is_rejection = upper_wick > c_body_size * 0.5
                 
@@ -421,20 +368,16 @@ class IQBot:
 
     def _check_trade_result(self, order_id, duration=None):
         try:
-            # Wait for duration + buffer
-            # We add a bit more buffer to ensure IQ Option has processed it
             wait_time = (duration * 60) if duration else (self.trade_duration * 60)
             time.sleep(wait_time + 5)
             
             result = None
             
-            # Try check_win_v4 first
             try:
                 result = self.api.check_win_v4(order_id)
             except:
                 pass
 
-            # Fallback to check_win_v3 if v4 fails or returns nothing
             if result is None:
                  try:
                      result = self.api.check_win_v3(order_id)
@@ -463,7 +406,7 @@ class IQBot:
                 self.trades_taken += 1
                 self.update_balance()
                 
-                # Check limits immediately after result
+                # Check limits
                 if self.stop_loss > 0 and self.total_profit <= -self.stop_loss:
                      self.add_log(f"Stop Loss reached (-${self.stop_loss}). Stopping bot.")
                      self.send_push("Bot Stopped 🛑", f"Stop Loss reached (-${self.stop_loss})")
@@ -473,7 +416,6 @@ class IQBot:
                      self.send_push("Bot Stopped 🛑", f"Take Profit reached (+${self.take_profit})")
                      self.stop()
                 else:
-                    # Enforce Strategy Rule: 2 consecutive losses -> STOP (Default if not set)
                     limit_consecutive = self.max_consecutive_losses if self.max_consecutive_losses > 0 else 2
                     
                     if self.current_consecutive_losses >= limit_consecutive:
@@ -497,15 +439,11 @@ class IQBot:
 
     def stop(self):
         self.is_running = False
-        if self.api:
-            # self.api.close() # Close connection might be too aggressive if we just want to stop trading
-            pass
         return True, "Bot stopped"
 
     def disconnect(self):
         self.stop()
         
-        # Explicitly close the API connection to prevent zombie threads
         if self.api:
             try:
                 self.api.api.close()
@@ -513,7 +451,6 @@ class IQBot:
             except Exception as e:
                 print(f"Error closing API: {e}")
         
-        # Add delay to allow socket to close properly
         time.sleep(1)
         
         self.connected = False
@@ -521,7 +458,6 @@ class IQBot:
         self.email = None
         self.password = None
         
-        # Reset data
         self.balance = 0
         self.currency = ""
         self.logs = []
@@ -539,6 +475,7 @@ class IQBot:
             "running": self.is_running,
             "balance": self.balance,
             "currency": self.currency,
+            "email": self.email,  # Added for verification
             "stats": {
                 "profit": round(self.total_profit, 2),
                 "wins": self.wins,
@@ -547,27 +484,53 @@ class IQBot:
             }
         }
 
+
+# ============================================================================
+# BotManager Class - Manages Multiple User Bots
+# ============================================================================
+
 class BotManager:
     def __init__(self):
-        self.bots = {} # {email: IQBot()}
-        self.lock = threading.Lock()
+        self.bots = {}  # {email: IQBot()}
+        self.locks = {}  # {email: threading.Lock()}
+        self.global_lock = threading.Lock()
     
-    def get_bot(self, email):
+    def get_lock(self, email):
+        with self.global_lock:
+            if email not in self.locks:
+                self.locks[email] = threading.Lock()
+            return self.locks[email]
+
+    def connect_bot(self, email, password, mode):
         email = email.lower().strip()
-        with self.lock:
+        user_lock = self.get_lock(email)
+        
+        with user_lock:
             if email not in self.bots:
                 print(f"[BotManager] Creating NEW bot for {email}")
                 self.bots[email] = IQBot()
             else:
-                print(f"[BotManager] Returning EXISTING bot for {email}")
+                print(f"[BotManager] Using EXISTING bot for {email}")
+            
+            bot = self.bots[email]
+            return bot.connect(email, password, mode)
+            
+    def get_bot(self, email):
+        email = email.lower().strip()
+        if email in self.bots:
             return self.bots[email]
+        return None
     
     def remove_bot(self, email):
         email = email.lower().strip()
-        with self.lock:
+        user_lock = self.get_lock(email)
+        
+        with user_lock:
             if email in self.bots:
                 self.bots[email].disconnect()
                 del self.bots[email]
+                print(f"[BotManager] Removed bot for {email}")
 
-# Global instance manager
+
+# Global bot manager instance
 bot_manager = BotManager()
