@@ -3,6 +3,7 @@
     "name": "BOI",
     "slug": "BOI",
     "version": "1.0.0",
+    "sdkVersion": "52.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -31,6 +32,10 @@
       "eas": {
         "projectId": "3ba5e4fc-1341-486e-a96c-6092e38931d3"
       }
-    }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
   }
 }
