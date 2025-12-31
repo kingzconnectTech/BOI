@@ -113,6 +113,9 @@ def start_bot(login_data: LoginRequest):
             raise HTTPException(status_code=400, detail=message)
         
         bot = bot_manager.get_bot(login_data.email)
+        if not bot:
+             raise HTTPException(status_code=500, detail="Bot initialization failed")
+             
         bot.clear_logs() # Clear previous logs
         
         # Set config
@@ -163,6 +166,8 @@ def update_bot(data: UpdateRequest):
 @app.post("/stop")
 def stop_bot(request: StopRequest):
     bot = bot_manager.get_bot(request.email)
+    if not bot:
+        return {"status": "stopped", "message": "Bot not active"}
     success, message = bot.stop()
     return {"status": "stopped", "message": message}
 
@@ -174,11 +179,21 @@ def disconnect_bot(request: DisconnectRequest):
 @app.get("/status")
 def get_status(email: str):
     bot = bot_manager.get_bot(email)
+    if not bot:
+        return {
+            "connected": False, 
+            "running": False, 
+            "balance": 0, 
+            "currency": "", 
+            "stats": {"profit": 0, "wins": 0, "losses": 0, "win_rate": 0}
+        }
     return bot.get_status()
 
 @app.get("/logs")
 def get_logs(email: str):
     bot = bot_manager.get_bot(email)
+    if not bot:
+        return {"logs": []}
     return {"logs": bot.get_logs()}
 
 if __name__ == "__main__":
