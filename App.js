@@ -208,6 +208,7 @@ export default function App() {
     setIsLoading(true);
     // Switch to dashboard immediately to show logs
     setPage('dashboard');
+    setIsRunning(false); // Reset running state immediately
     addLog('Connecting to IQ Option...'); 
 
     try {

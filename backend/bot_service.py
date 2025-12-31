@@ -156,6 +156,12 @@ class IsolatedBot:
             self.process.terminate()
             self.process.join()
             
+        # Reset state to prevent old state from flickering
+        self.shared_dict['connected'] = False
+        self.shared_dict['is_running'] = False
+        self.shared_dict['logs'] = []
+        self.shared_dict['stats'] = {"profit": 0, "wins": 0, "losses": 0, "win_rate": 0}
+            
         # Spawn new process
         self.process = multiprocessing.Process(
             target=run_bot_process,
