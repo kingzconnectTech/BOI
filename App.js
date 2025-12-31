@@ -15,7 +15,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 const API_URL = Constants.expoConfig?.extra?.apiUrl || Constants.manifest?.extra?.apiUrl || 'https://brickchain.online';
 // const API_URL = 'https://brickchain.online'; 
 // const API_URL = 'http://127.0.0.1:8000'; 
-// const API_URL = 'https://boi-lgdy.onrender.com'; 
+// const API_URL = 'http://192.168.43.76:8000';  // Fallback if needed 
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({
@@ -234,12 +234,15 @@ export default function App() {
         }
     } catch (error) {
         // Go back to connect page on failure
-        // setPage('bot_connect'); // Optional: stay on dashboard to see logs?
-        // Let's stay on dashboard but allow retry via logout or back button if we had one.
-        // Actually, if we fail, we should probably go back so they can fix credentials.
         setPage('bot_connect');
         const errorMsg = error.response?.data?.detail || error.message;
-        alert(`Connection Failed: ${errorMsg}`);
+        
+        // Detailed Network Error Handling
+        if (error.message === 'Network Error') {
+             alert('Connection Failed: Network Error.\n\nPossible reasons:\n1. Server is down or restarting.\n2. Internet connection is unstable.\n3. Firewall/VPN is blocking access.\n\nTry again in a few seconds.');
+        } else {
+             alert(`Connection Failed: ${errorMsg}`);
+        }
     } finally {
         setIsLoading(false);
     }
@@ -272,7 +275,13 @@ export default function App() {
     } catch (error) {
       setIsRunning(false);
       const errorMsg = error.response?.data?.detail || error.message;
-      alert(`Connect/Start Failed: ${errorMsg}`);
+      
+      if (error.message === 'Network Error') {
+          alert('Start Failed: Network Error.\nCheck your internet connection and try again.');
+      } else {
+          alert(`Connect/Start Failed: ${errorMsg}`);
+      }
+      
       addLog(`Start Failed: ${errorMsg}`);
     }
   };
