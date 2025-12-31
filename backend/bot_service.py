@@ -7,10 +7,11 @@ from iq_bot import IQBot
 # Force 'spawn' method for multiprocessing compatibility on Linux/Render
 # This is crucial because 'fork' (default on Linux) can cause issues with 
 # threaded libraries like websocket-client used by iqoptionapi.
-try:
-    multiprocessing.set_start_method('spawn', force=True)
-except RuntimeError:
-    pass # Context already set
+# Moved to main.py to ensure it runs early
+# try:
+#     multiprocessing.set_start_method('spawn', force=True)
+# except RuntimeError:
+#     pass # Context already set
 
 # ============================================================================
 # BotProcess Function - Runs in a separate process
@@ -22,11 +23,16 @@ def run_bot_process(email, password, mode, shared_dict, command_queue):
     Manages the IQBot instance and synchronizes state with shared_dict.
     """
     try:
+        # Debug Log - Prove process started
+        print(f"[BotProcess-{email}] Process STARTING. PID: {multiprocessing.current_process().pid}")
+        shared_dict['logs'] = [f"Process started (PID: {multiprocessing.current_process().pid}). Connecting..."]
+        
         bot = IQBot()
         
         # Initial connection
-        print(f"[BotProcess-{email}] Process started. PID: {multiprocessing.current_process().pid}")
+        print(f"[BotProcess-{email}] Calling bot.connect...")
         success, message = bot.connect(email, password, mode)
+        print(f"[BotProcess-{email}] bot.connect returned: {success}, {message}")
         
         # Update initial state
         if success:

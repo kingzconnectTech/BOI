@@ -6,9 +6,16 @@ import os
 import threading
 import time
 import requests
+import multiprocessing
 from bot_service import bot_manager
 import firebase_admin
 from firebase_admin import credentials
+
+# Force 'spawn' method for multiprocessing compatibility on Linux/Render
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
