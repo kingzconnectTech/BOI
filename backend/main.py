@@ -6,16 +6,9 @@ import os
 import threading
 import time
 import requests
-import multiprocessing
 from bot_service import bot_manager
 import firebase_admin
 from firebase_admin import credentials
-
-# Force 'spawn' method for multiprocessing compatibility on Linux/Render
-try:
-    multiprocessing.set_start_method('spawn', force=True)
-except RuntimeError:
-    pass
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
@@ -41,20 +34,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Keep-Alive Mechanism for Render Free Tier
+# Keep-Alive Mechanism (optional; set KEEP_ALIVE_URL env to enable)
 def keep_alive():
-    url = "https://boi-9ixk.onrender.com"
+    url = os.getenv("KEEP_ALIVE_URL", "").strip()
+    if not url:
+        return
     while True:
         try:
             time.sleep(600) # Ping every 10 minutes
             print(f"Pinging {url} to keep alive...")
-            requests.get(url)
+            requests.get(url, timeout=10)
         except Exception as e:
             print(f"Keep-alive ping failed: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    # Start the keep-alive thread
+    # Start the keep-alive thread (only runs if KEEP_ALIVE_URL is set)
     threading.Thread(target=keep_alive, daemon=True).start()
 
 class ConnectRequest(BaseModel):

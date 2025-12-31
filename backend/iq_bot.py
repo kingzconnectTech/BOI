@@ -2,12 +2,7 @@ from iqoptionapi.stable_api import IQ_Option
 import time
 import threading
 import traceback
-try:
-    import talib
-    print("[IQBot] TA-Lib loaded successfully")
-except ImportError:
-    print("[IQBot] Warning: TA-Lib not found. Strategies requiring indicators may fail.")
-    talib = None
+import talib
 import numpy as np
 import uuid
 from datetime import datetime, timedelta

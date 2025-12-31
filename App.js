@@ -11,9 +11,10 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
-// Backend URL
-// const API_URL = 'http://192.168.43.76:8000'; 
-const API_URL = 'https://boi-9ixk.onrender.com';  
+const API_URL =
+  (Constants?.expoConfig?.extra?.API_URL) ||
+  (Constants?.manifest?.extra?.API_URL) ||
+  'http://54.160.2.145:8000';
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({
