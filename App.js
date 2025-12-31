@@ -14,7 +14,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 const API_URL =
   (Constants?.expoConfig?.extra?.API_URL) ||
   (Constants?.manifest?.extra?.API_URL) ||
-  'http://54.160.2.145:8000';
+  'https://brickchain.online';
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({
