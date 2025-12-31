@@ -203,15 +203,19 @@ class IQBot:
         self.add_log("Trading loop started.")
         while self.is_running and self.connected:
             try:
+                # If a trade is in progress, skip scanning to prevent log spam
+                if self.trade_in_progress:
+                    time.sleep(1)
+                    continue
+
                 self.add_log("Starting market scan...")
 
                 for pair in self.pairs_to_scan:
                     if not self.is_running: 
                         break
                     
-                    # Double check if trade started during loop
+                    # Double check if trade started during loop (redundant but safe)
                     if self.trade_in_progress: 
-                        self.add_log("Trade in progress. Pausing analysis.")
                         break
 
                     try:
