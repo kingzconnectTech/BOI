@@ -14,7 +14,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 // Backend URL
 const API_URL = Constants.expoConfig?.extra?.apiUrl || Constants.manifest?.extra?.apiUrl || 'https://brickchain.online';
 // const API_URL = 'https://brickchain.online'; 
-// const API_URL = 'http://192.168.43.76:8000'; 
+// const API_URL = 'http://127.0.0.1:8000'; 
 // const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
 
@@ -106,8 +106,8 @@ export default function App() {
           if (statusResponse.data) {
             setStats(statusResponse.data.stats || { profit: 0, wins: 0, losses: 0, win_rate: 0 });
             
-            // Only update running state if no recent user action (prevents flicker)
-            if (Date.now() - lastActionTime.current > 3000) {
+            // Only update running state if no recent user action and not loading (prevents flicker)
+            if (Date.now() - lastActionTime.current > 3000 && !isLoading) {
                  setIsRunning(statusResponse.data.running);
             }
             

@@ -225,9 +225,8 @@ class IQBot:
             # Expiry Rule: Use configured duration
             expiry_duration = self.trade_duration 
             
-            # Money Management: Risk 1-2% per trade
-            safe_max = max(1.0, self.balance * 0.02)
-            actual_amount = min(self.trade_amount, safe_max)
+            # Money Management: Use configured amount directly
+            actual_amount = self.trade_amount
             
             # Check Auto Trading
             if not self.auto_trading:
