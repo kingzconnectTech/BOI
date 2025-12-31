@@ -171,6 +171,17 @@ class IQBot:
         self.add_log("Trading loop started.")
         while self.is_running and self.connected:
             try:
+                # Connection Check & Reconnect
+                if not self.api.check_connect():
+                    self.add_log("Connection lost. Attempting to reconnect...")
+                    check, reason = self.api.connect()
+                    if check:
+                        self.add_log("Reconnected successfully.")
+                    else:
+                        self.add_log(f"Reconnection failed: {reason}")
+                        time.sleep(5)
+                        continue
+
                 self.add_log("Starting market scan...")
 
                 for pair in self.pairs_to_scan:
