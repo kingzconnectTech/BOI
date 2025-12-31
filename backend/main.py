@@ -34,14 +34,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Keep-Alive Mechanism (optional; set KEEP_ALIVE_URL env to enable)
+# Keep-Alive Mechanism (AWS/Render)
 def keep_alive():
-    url = os.getenv("KEEP_ALIVE_URL", "").strip()
-    if not url:
-        return
+    url = "https://brickchain.online"
     while True:
         try:
-            time.sleep(600) # Ping every 10 minutes
+            time.sleep(300) # Ping every 5 minutes
             print(f"Pinging {url} to keep alive...")
             requests.get(url, timeout=10)
         except Exception as e:
@@ -49,7 +47,7 @@ def keep_alive():
 
 @app.on_event("startup")
 async def startup_event():
-    # Start the keep-alive thread (only runs if KEEP_ALIVE_URL is set)
+    # Start the keep-alive thread
     threading.Thread(target=keep_alive, daemon=True).start()
 
 class ConnectRequest(BaseModel):

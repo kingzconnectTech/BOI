@@ -20,14 +20,14 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.boi.tradingbot",
+      "package": "com.techboi.boi",
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "API_URL": "https://brickchain.online",
+      "apiUrl": "https://brickchain.online",
       "eas": {
         "projectId": "3ba5e4fc-1341-486e-a96c-6092e38931d3"
       }

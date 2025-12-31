@@ -11,10 +11,11 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
-const API_URL =
-  (Constants?.expoConfig?.extra?.API_URL) ||
-  (Constants?.manifest?.extra?.API_URL) ||
-  'https://brickchain.online';
+// Backend URL
+const API_URL = Constants.expoConfig?.extra?.apiUrl || Constants.manifest?.extra?.apiUrl || 'https://brickchain.online';
+// const API_URL = 'https://brickchain.online'; 
+// const API_URL = 'http://192.168.43.76:8000'; 
+// const API_URL = 'https://boi-lgdy.onrender.com'; 
 const { width } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({

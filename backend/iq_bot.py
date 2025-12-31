@@ -111,47 +111,16 @@ class IQBot:
         self.email = email
         self.password = password
         
-        # Retry mechanism
-        check = False
-        reason = "Unknown error"
-        max_retries = 3
+        # Create NEW instance - This acts as a separate "machine" for this user
+        self.api = IQ_Option(email, password)
+        print(f"[IQBot] Initializing separate bot instance {id(self.api)} for {email}")
         
-        for attempt in range(max_retries):
-            try:
-                # Create NEW instance - This acts as a separate "machine" for this user
-                # Recreating on retry ensures fresh state
-                if self.api:
-                    try:
-                        self.api.api.close()
-                        del self.api
-                    except:
-                        pass
-                
-                self.api = IQ_Option(email, password)
-                
-                if attempt == 0:
-                    print(f"[IQBot] Initializing separate bot instance {id(self.api)} for {email}")
-                    # Clear logs and stats on new connection to prevent data leak
-                    self.clear_logs()
-                    self.reset_stats()
-                else:
-                    print(f"[IQBot] Retry attempt {attempt+1}/{max_retries} for {email}")
-
-                # Attempt connection
-                check, reason = self.api.connect()
-                
-                if check:
-                    break
-                else:
-                    print(f"[IQBot] Connection attempt {attempt+1} failed: {reason}")
-                    if attempt < max_retries - 1:
-                        time.sleep(3) # Wait before retry
-                        
-            except Exception as e:
-                print(f"[IQBot] Error during connection attempt {attempt+1}: {e}")
-                reason = str(e)
-                if attempt < max_retries - 1:
-                    time.sleep(3)
+        # Clear logs and stats on new connection to prevent data leak
+        self.clear_logs()
+        self.reset_stats()
+        
+        # Attempt connection
+        check, reason = self.api.connect()
         
         if check:
             self.connected = True
@@ -173,9 +142,8 @@ class IQBot:
             
             # Clean up failed instance
             try:
-                if self.api:
-                    self.api.api.close()
-                    del self.api
+                self.api.api.close()
+                del self.api
                 self.api = None
             except: 
                 pass
@@ -183,7 +151,7 @@ class IQBot:
             if reason == "[{'code': 'invalid_credentials', 'message': 'You entered the wrong credentials. Please check that the login and password is correct.'}]":
                  return False, "Invalid Credentials"
             
-            return False, f"Connection failed after {max_retries} attempts: {reason}"
+            return False, f"Connection failed: {reason}"
 
     def update_balance(self):
         if self.connected:
@@ -203,19 +171,15 @@ class IQBot:
         self.add_log("Trading loop started.")
         while self.is_running and self.connected:
             try:
-                # If a trade is in progress, skip scanning to prevent log spam
-                if self.trade_in_progress:
-                    time.sleep(1)
-                    continue
-
                 self.add_log("Starting market scan...")
 
                 for pair in self.pairs_to_scan:
                     if not self.is_running: 
                         break
                     
-                    # Double check if trade started during loop (redundant but safe)
+                    # Double check if trade started during loop
                     if self.trade_in_progress: 
+                        self.add_log("Trade in progress. Pausing analysis.")
                         break
 
                     try:
