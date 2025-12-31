@@ -54,6 +54,7 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('Checking...');
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
+  const lastActionTime = React.useRef(0); // To prevent polling flicker
   const [expoPushToken, setExpoPushToken] = useState('');
   const [nextTradingTime, setNextTradingTime] = useState(null); // New state for market status
   const [isLoading, setIsLoading] = useState(false);
@@ -104,7 +105,12 @@ export default function App() {
           const statusResponse = await axios.get(`${API_URL}/status?email=${email}`);
           if (statusResponse.data) {
             setStats(statusResponse.data.stats || { profit: 0, wins: 0, losses: 0, win_rate: 0 });
-            setIsRunning(statusResponse.data.running);
+            
+            // Only update running state if no recent user action (prevents flicker)
+            if (Date.now() - lastActionTime.current > 3000) {
+                 setIsRunning(statusResponse.data.running);
+            }
+            
             setSignals(statusResponse.data.signals || []);
             if (statusResponse.data.currency) {
                 setCurrency(statusResponse.data.currency);
@@ -259,6 +265,7 @@ export default function App() {
       if (response.data.status === 'started') {
         setPage('dashboard');
         setIsRunning(true);
+        lastActionTime.current = Date.now();
         addLog(`Success: ${response.data.message}`);
       }
     } catch (error) {
@@ -285,12 +292,30 @@ export default function App() {
     }
   };
 
+  const handleAutoTradingChange = async (value) => {
+    setAutoTrading(value);
+    // If bot is running, update the backend configuration immediately
+    if (isRunning) {
+        try {
+            addLog(`Updating Auto Trading to ${value ? 'Active' : 'Signal Only'}...`);
+            await axios.post(`${API_URL}/update`, {
+                email: email,
+                auto_trading: value
+            });
+            addLog(`Auto Trading updated.`);
+        } catch (error) {
+            addLog(`Error updating Auto Trading: ${error.message}`);
+        }
+    }
+  };
+
   const handleStop = async () => {
     try {
       addLog('Stopping bot...');
       const response = await axios.post(`${API_URL}/stop`, { email: email });
       if (response.data.status === 'stopped') {
         setIsRunning(false);
+        lastActionTime.current = Date.now();
         addLog('Bot stopped successfully');
       }
     } catch (error) {
@@ -748,7 +773,7 @@ export default function App() {
                 trackColor={{ false: "#334155", true: "#3b82f6" }}
                 thumbColor={autoTrading ? "#fff" : "#cbd5e1"}
                 ios_backgroundColor="#334155"
-                onValueChange={setAutoTrading}
+                onValueChange={handleAutoTradingChange}
                 value={autoTrading}
             />
           </View>
