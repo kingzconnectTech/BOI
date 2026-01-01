@@ -40,7 +40,7 @@ app.add_middleware(
 
 # Keep-Alive Mechanism (AWS/Render)
 def keep_alive():
-    url = "http://brickchain.online"
+    url = "https://brickchain.online"
     while True:
         try:
             time.sleep(300) # Ping every 5 minutes
