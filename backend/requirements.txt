@@ -8,3 +8,5 @@ requests
 TA-Lib
 exponent_server_sdk
 firebase-admin
+redis
+celery
