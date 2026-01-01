@@ -12,8 +12,8 @@ import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // Backend URL
-const API_URL = Constants.expoConfig?.extra?.apiUrl || Constants.manifest?.extra?.apiUrl || 'https://brickchain.online';
-// const API_URL = 'https://brickchain.online'; 
+const API_URL = Constants.expoConfig?.extra?.apiUrl || Constants.manifest?.extra?.apiUrl || 'http://brickchain.online';
+// const API_URL = 'http://brickchain.online'; 
 // const API_URL = 'http://127.0.0.1:8000'; 
 // const API_URL = 'http://192.168.43.76:8000';  // Fallback if needed 
 const { width } = Dimensions.get('window');

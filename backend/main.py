@@ -40,7 +40,7 @@ app.add_middleware(
 
 # Keep-Alive Mechanism (AWS/Render)
 def keep_alive():
-    url = "https://brickchain.online"
+    url = "http://brickchain.online"
     while True:
         try:
             time.sleep(300) # Ping every 5 minutes
@@ -97,23 +97,17 @@ def read_root():
 
 @app.post("/connect")
 def connect_bot(data: ConnectRequest):
-    # In Celery architecture, 'connect' usually starts the session/task
-    # Check if already active
+    """
+    Checks if a bot session is active.
+    Note: In this stateless architecture, /connect is mostly a 'pre-flight' check.
+    The actual connection happens when /start queues the task.
+    """
     key_active = f"bot:{data.email}:active"
     if redis_client.exists(key_active):
         return {"status": "connected", "message": "Bot already active", "data": get_status(data.email)}
 
-    # We don't start the full trading loop here, just verifying creds?
-    # Or maybe we treat connect as "ready to start".
-    # For now, let's say connect is successful if we can queue the task, 
-    # but the user flow seems to be Connect -> Start.
-    # To keep it compatible, we might just return success and let /start trigger the task.
-    
-    # Actually, previous implementation did a real connection check.
-    # We can't easily do that without a worker.
-    # We'll return simulated success and let /start handle the real connection.
-    
-    return {"status": "connected", "message": "Ready to start (Celery Mode)", "data": {"connected": True}}
+    # Return success so frontend proceeds to 'start' page
+    return {"status": "connected", "message": "Ready to start", "data": {"connected": True}}
 
 @app.post("/start")
 def start_bot(login_data: LoginRequest):

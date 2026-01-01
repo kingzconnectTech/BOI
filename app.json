@@ -28,7 +28,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiUrl": "http://192.168.43.76:8001",
+      "apiUrl": "http://brickchain.online",
       "eas": {
         "projectId": "3ba5e4fc-1341-486e-a96c-6092e38931d3"
       }
