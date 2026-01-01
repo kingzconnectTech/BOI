@@ -56,9 +56,31 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false);
   const lastActionTime = React.useRef(0); // To prevent polling flicker
   const [expoPushToken, setExpoPushToken] = useState('');
-  const [nextTradingTime, setNextTradingTime] = useState(null); // New state for market status
+  const [upcomingSession, setUpcomingSession] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showAdvice, setShowAdvice] = useState(false);
+
+  const getNextSession = () => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const timeInMinutes = currentHour * 60 + currentMinute;
+
+    const sessions = [
+        { name: "London Session", start: "09:00", startMinutes: 9 * 60 },
+        { name: "New York Session", start: "14:30", startMinutes: 14 * 60 + 30 },
+        { name: "OTC Golden Hours", start: "19:00", startMinutes: 19 * 60 }
+    ];
+
+    // Find next session
+    for (let session of sessions) {
+        if (timeInMinutes < session.startMinutes) {
+            return session;
+        }
+    }
+    // If none found, return first one (tomorrow)
+    return { ...sessions[0], isTomorrow: true };
+  };
 
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => setExpoPushToken(token));
@@ -121,11 +143,8 @@ export default function App() {
                      setAmount(statusResponse.data.min_amount.toString());
                 }
             }
-            if (statusResponse.data.next_trading_time) {
-                 setNextTradingTime(statusResponse.data.next_trading_time);
-            } else {
-                 setNextTradingTime(null);
-            }
+            // Update upcoming session locally
+            setUpcomingSession(getNextSession());
           }
         } catch (error) {
           console.log("Error fetching data:", error.message);
@@ -384,11 +403,11 @@ export default function App() {
     return token;
   }
 
-  const handleScheduleNotification = async () => {
-    if (!nextTradingTime) return;
+  const handleScheduleNotification = async (session) => {
+    if (!session) return;
     
     // Parse time string (e.g., "14:00")
-    const timeParts = nextTradingTime.split(' ')[0].split(':');
+    const timeParts = session.start.split(':');
     const hour = parseInt(timeParts[0]);
     const minute = parseInt(timeParts[1]);
     
@@ -398,8 +417,8 @@ export default function App() {
     trigger.setMinutes(minute);
     trigger.setSeconds(0);
     
-    // If time is in past, assume tomorrow (though backend handles "Tomorrow" label, simple check here)
-    if (trigger <= now) {
+    // If tomorrow
+    if (session.isTomorrow || trigger <= now) {
         trigger.setDate(trigger.getDate() + 1);
     }
     
@@ -410,7 +429,7 @@ export default function App() {
         await Notifications.scheduleNotificationAsync({
             content: {
                 title: "Trading Session Starting Soon!",
-                body: `Market opens at ${nextTradingTime}. Get ready!`,
+                body: `${session.name} starts at ${session.start}. Get ready!`,
             },
             trigger: trigger,
         });
@@ -621,16 +640,16 @@ export default function App() {
             </View>
         </Modal>
 
-        {/* Market Closed Warning */}
-        {nextTradingTime && (
-            <View style={styles.warningCard}>
-                <MaterialCommunityIcons name="clock-alert-outline" size={24} color="#fff" />
+        {/* Next Session Info */}
+        {upcomingSession && (
+            <View style={[styles.warningCard, { backgroundColor: '#0f172a', borderColor: '#334155', borderWidth: 1 }]}>
+                <MaterialCommunityIcons name="clock-check-outline" size={24} color="#3b82f6" />
                 <View style={{flex: 1, marginLeft: 10}}>
-                    <Text style={styles.warningTitle}>Market Currently Closed</Text>
-                    <Text style={styles.warningText}>Next session starts at: {nextTradingTime}</Text>
+                    <Text style={styles.warningTitle}>Next Recommended Session</Text>
+                    <Text style={styles.warningText}>{upcomingSession.name} starts at {upcomingSession.start}</Text>
                 </View>
-                <TouchableOpacity style={styles.reminderButton} onPress={handleScheduleNotification}>
-                    <MaterialCommunityIcons name="bell-ring" size={20} color="#fff" />
+                <TouchableOpacity style={styles.reminderButton} onPress={() => handleScheduleNotification(upcomingSession)}>
+                    <MaterialCommunityIcons name="bell-ring" size={20} color="#3b82f6" />
                 </TouchableOpacity>
             </View>
         )}
