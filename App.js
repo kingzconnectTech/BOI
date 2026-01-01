@@ -642,7 +642,7 @@ export default function App() {
 
         {/* Next Session Info */}
         {upcomingSession && (
-            <View style={[styles.warningCard, { backgroundColor: '#0f172a', borderColor: '#334155', borderWidth: 1 }]}>
+            <View style={[styles.warningCard, { backgroundColor: '#0f172a', borderColor: '#334155', borderWidth: 1, marginBottom: 20 }]}>
                 <MaterialCommunityIcons name="clock-check-outline" size={24} color="#3b82f6" />
                 <View style={{flex: 1, marginLeft: 10}}>
                     <Text style={styles.warningTitle}>Next Recommended Session</Text>
