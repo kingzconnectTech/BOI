@@ -12,6 +12,7 @@ from exponent_server_sdk import PushClient, PushMessage
 # ============================================================================
 # IQBot Class - Single User Bot Instance (Logic only)
 # ============================================================================
+active_bot = None
 
 class IQBot:
     def __init__(self):
@@ -799,7 +800,15 @@ class IQBot:
         
         return True, "Disconnected"
 
-@celery_app.task
-def test_task():
-    print("✅ Test task executed")
-    return "Task completed"
+
+
+@celery_app.task(bind=True)
+def start_bot_task(self, email, password):
+    global active_bot
+    from .trading_bot import IQBot
+    active_bot = IQBot()
+    check, msg = active_bot.connect(email, password, mode="PRACTICE")
+    if not check:
+        return f"Failed: {msg}"
+    active_bot.start_trading()
+    return f"Bot started for {email}"
