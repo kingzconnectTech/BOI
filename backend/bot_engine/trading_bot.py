@@ -1,4 +1,5 @@
 from iqoptionapi.stable_api import IQ_Option
+from .celery_app import celery_app
 import time
 import threading
 import traceback
@@ -162,12 +163,22 @@ class IQBot:
     def start_trading(self):
         with self.lock:
             if self.is_running:
-                self.add_log("Bot is already running.")
-                return
-                
+                self.add_log("Bot already running.")
+                return False
+
+            if not self.connected:
+                self.add_log("Cannot start bot: Not connected.")
+                return False
+
             self.is_running = True
-            self.add_log("Starting trading loop...")
-            threading.Thread(target=self._trading_loop, daemon=True).start()
+            self.add_log("Bot started successfully.")
+            threading.Thread(
+                target=self._trading_loop,
+                daemon=True
+            ).start()
+
+            return True
+
 
     def _trading_loop(self):
         self.add_log("Trading loop started.")
@@ -787,3 +798,8 @@ class IQBot:
         self.reset_stats()
         
         return True, "Disconnected"
+
+@celery_app.task
+def test_task():
+    print("✅ Test task executed")
+    return "Task completed"
