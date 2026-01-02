@@ -7,10 +7,9 @@ celery = Celery(
 )
 
 celery.conf.update(
-    task_routes={
-        "bot_engine.trading_bot.*": {"queue": "default"}
-    },
-    accept_content=["json"],
     task_serializer="json",
+    accept_content=["json"],
     result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
 )
