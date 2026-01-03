@@ -4,6 +4,7 @@ celery = Celery(
     "boi",
     broker="redis://:BoiRedis@2026!@127.0.0.1:6379/0",
     backend="redis://:BoiRedis@2026!@127.0.0.1:6379/0",
+    include=["tasks"],  # ✅ THIS IS THE KEY FIX
 )
 
 celery.conf.update(
@@ -13,6 +14,3 @@ celery.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
-
-
-celery.autodiscover_tasks(["backend"])

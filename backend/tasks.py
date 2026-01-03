@@ -1,5 +1,5 @@
 from celery_app import celery
 
-@celery.task(bind=True, name="test_task")
-def test_task(self):
+@celery.task(name="test_task")
+def test_task():
     return "Celery is working!"
