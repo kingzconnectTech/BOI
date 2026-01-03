@@ -9,7 +9,7 @@ import requests
 import json
 import firebase_admin
 from firebase_admin import credentials
-from tasks import run_trading_bot, celery_app, redis_client
+from tasks import run_trading_bot, celery_app, redis_client, test_task
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
@@ -94,6 +94,11 @@ class UpdateRequest(BaseModel):
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Backend is running"}
+
+@app.post("/test-task")
+def run_test_task(name: str):
+    task = test_task.delay(name)
+    return {"status": "queued", "task_id": task.id}
 
 @app.post("/connect")
 def connect_bot(data: ConnectRequest):
