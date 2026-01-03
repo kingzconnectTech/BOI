@@ -4,10 +4,10 @@ celery = Celery(
     "boi",
     broker="redis://:BoiRedis@2026!@127.0.0.1:6379/0",
     backend="redis://:BoiRedis@2026!@127.0.0.1:6379/0",
-    include=["tasks"],  # ✅ THIS IS THE KEY FIX
 )
 
 celery.conf.update(
+    task_default_queue="celery",
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
